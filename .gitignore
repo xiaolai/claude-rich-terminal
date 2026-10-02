@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+dev-docs/
+*.log
+.env
+.env.*
+!.env.example
+.claude-plugin/types/
+.cc-suite/

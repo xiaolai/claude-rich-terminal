@@ -1,0 +1,34 @@
+{
+  "name": "rich-terminal",
+  "version": "0.1.0",
+  "description": "Mermaid diagrams drawn inside Claude Code replies, with optional terminal images and a full browser view.",
+  "author": {
+    "name": "xiaolai"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "images": {
+      "type": "boolean",
+      "title": "Diagram images",
+      "description": "Draw Mermaid diagrams as pictures (Ghostty, kitty). Needs Chrome, Chromium, Edge or Brave.",
+      "default": false
+    },
+    "imageTheme": {
+      "type": "string",
+      "title": "Image theme",
+      "description": "Mermaid theme for diagram pictures: dark for a dark terminal, default for a light one.",
+      "default": "dark",
+      "options": [
+        "dark",
+        "default"
+      ]
+    },
+    "browser": {
+      "type": "string",
+      "title": "Browser path",
+      "description": "A Chromium-based browser to draw pictures with; empty finds one.",
+      "default": ""
+    }
+  },
+  "license": "MIT"
+}
