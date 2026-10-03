@@ -41,7 +41,7 @@ Pictures are drawn once per diagram by headless Chrome. The text drawing shows u
 
 ## Cache
 
-Browser pages and pictures are kept in `~/.claude/plugins/data/rich-terminal/` (or `$CLAUDE_PLUGIN_DATA`). They contain the source of the diagrams you opened or drew as pictures, plus a headless-Chrome profile per session. Nothing is removed automatically; delete the folder at any time to clear it.
+Browser pages and pictures are kept in `~/.claude/plugins/data/rich-terminal/`, an owner-only folder. They contain the source of the diagrams you opened or drew as pictures, plus a headless-Chrome profile per session. Nothing is removed automatically; delete the folder at any time to clear it.
 
 ## Install
 

@@ -75,9 +75,7 @@ async function workDir($: EngineInterface): Promise<string | undefined> {
   cacheDir = undefined
   const home = await $.env.get('HOME')
   if (home === undefined || !home.startsWith('/')) return undefined
-  const configured = await $.env.get('CLAUDE_PLUGIN_DATA')
-  // Only a folder under the person's home is used; anything else is ignored before a byte is written.
-  const dir = configured !== undefined && configured.startsWith(`${home}/`) && !configured.includes('/../') ? configured : `${home}/.claude/plugins/data/rich-terminal`
+  const dir = `${home}/.claude/plugins/data/rich-terminal`
   try {
     const base = (await $.fs.stat(home, { resolve: true })).realPath
     if (base === undefined) return undefined
