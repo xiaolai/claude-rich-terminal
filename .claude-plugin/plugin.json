@@ -1,6 +1,6 @@
 {
   "name": "rich-terminal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Mermaid diagrams drawn inside Claude Code replies, with optional terminal images and a full browser view.",
   "author": {
     "name": "xiaolai"

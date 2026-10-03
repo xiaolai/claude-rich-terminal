@@ -212,6 +212,9 @@ test('/rich open reports a failed opener instead of throwing', { timeoutMs: 90_0
 test('/rich open refuses a cache folder that resolves outside the home folder', { timeoutMs: 90_000 }, async ($, on) => {
   session(on, [REPLY])
   mock.env(on, { HOME: '/Users/me' })
+  mock.clock(on)
+  on('ui.log', () => ({ value: undefined }))
+  on('fs.exists', () => ({ value: true }))
   on('fs.write', () => ({ value: undefined }))
   on('fs.stat', (_$, e) => ({
     value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: true, realPath: e.path.startsWith('/Users/me/') ? '/tmp/planted' : e.path },
@@ -333,4 +336,30 @@ test('an unclosed fence shows a placeholder while a turn runs, and its source on
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
   await mountReply($, text)
   expect(seen.at(-1)!.text).toBe(text)
+})
+
+test('a refused cache folder is retried after 30 s, and the reason is shown', { timeoutMs: 90_000 }, async ($, on) => {
+  session(on, [REPLY])
+  const files = new Map<string, string>()
+  const clock = mock.clock(on)
+  let slow = true
+  mock.env(on, { HOME: '/Users/me' })
+  on('ui.log', () => ({ value: undefined }))
+  on('fs.write', (_$, e) => {
+    files.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('fs.exists', (_$, e) => ({ value: files.has(e.path) || e.path === '/usr/bin/open' }))
+  on('fs.stat', (_$, e) => ({ value: { kind: files.has(e.path) ? ('file' as const) : ('dir' as const), size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
+  on('process.run', (_$, e) => {
+    if (e.argv[0] === 'id' && slow) return { deny: 'timed out' }
+    const stdout = e.argv[0] === 'id' || e.argv[0] === 'stat' ? '501\n' : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  expect((await rich($, 'open')).text).toMatch(/no private cache folder \(.*timed out.*\)/)
+  slow = false
+  // Within the wait the refusal stands; after it, the folder is checked again and accepted.
+  expect((await rich($, 'open')).text).toContain('no private cache folder')
+  await clock.advance(31_000)
+  expect((await rich($, 'open')).text).toMatch(/^Opened flowchart [0-9a-f]{16} in the browser\.$/)
 })

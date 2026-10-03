@@ -64,40 +64,54 @@ const pictures = new Map<string, Picture | Failure>()
 const rendering = new Set<string>()
 const ascii = new Map<string, { source: string; art: string | undefined }>()
 let queue: Promise<unknown> = Promise.resolve()
-let cacheDir: string | undefined | null = null
+let cacheDir: string | undefined
+/** Why the cache folder was last refused, and when: a refusal is retried after `CACHE_RETRY_MS`. */
+let cacheError: { reason: string; at: number } | undefined
+const CACHE_RETRY_MS = 30_000
+const SYSTEM_TIMEOUT_MS = 20_000
 
 /**
  * The plugin's cache: under the person's own home, never a shared temporary
  * folder, and refused when it resolves anywhere else (a planted symlink).
  */
 async function workDir($: EngineInterface): Promise<string | undefined> {
-  if (cacheDir !== null) return cacheDir
-  cacheDir = undefined
+  if (cacheDir !== undefined) return cacheDir
+  if (cacheError !== undefined && (await $.clock.now()) - cacheError.at < CACHE_RETRY_MS) return undefined
+  const refuse = async (reason: string) => {
+    cacheError = { reason, at: await $.clock.now() }
+    $.ui.log(`rich-terminal: cache folder refused: ${reason}`, { to: 'debug' })
+    return undefined
+  }
   const home = await $.env.get('HOME')
-  if (home === undefined || !home.startsWith('/')) return undefined
+  if (home === undefined || !home.startsWith('/')) return await refuse('HOME is not set')
   const dir = `${home}/.claude/plugins/data/rich-terminal`
   try {
     const base = (await $.fs.stat(home, { resolve: true })).realPath
-    if (base === undefined) return undefined
+    if (base === undefined) return await refuse('the home folder could not be resolved')
     const inside = (stat: FsStat) => stat.kind === 'dir' && stat.realPath !== undefined && stat.realPath.startsWith(`${base}/`)
     // Check every existing folder on the way before writing anything: a planted link is never written through.
     for (let at = dir; at.length > home.length && at.startsWith(`${home}/`); at = at.slice(0, at.lastIndexOf('/'))) {
-      if ((await $.fs.exists(at)) && !inside(await $.fs.stat(at, { resolve: true }))) return undefined
+      if ((await $.fs.exists(at)) && !inside(await $.fs.stat(at, { resolve: true }))) return await refuse(`${at} leads outside the home folder`)
     }
     await $.fs.write(`${dir}/.keep`, '')
     const where = await $.fs.stat(dir, { resolve: true })
-    if (!inside(where)) return undefined
+    if (!inside(where)) return await refuse(`${dir} leads outside the home folder`)
     // Owner-only, and owned by this user: `$.fs` has neither, so ask the system.
-    const chmod = await $.process.run(['chmod', '700', where.realPath!], { timeoutMs: 5000 })
-    const me = await $.process.run(['id', '-u'], { timeoutMs: 5000 })
-    let owner = await $.process.run(['stat', '-f', '%u', where.realPath!], { timeoutMs: 5000 }).catch(() => undefined)
-    if (owner === undefined || owner.exitCode !== 0) owner = await $.process.run(['stat', '-c', '%u', where.realPath!], { timeoutMs: 5000 })
-    if (chmod.exitCode !== 0 || me.exitCode !== 0 || owner.exitCode !== 0 || owner.stdout.trim() !== me.stdout.trim()) return undefined
+    const run = (argv: string[]) => $.process.run(argv, { timeoutMs: SYSTEM_TIMEOUT_MS })
+    const chmod = await run(['chmod', '700', where.realPath!])
+    if (chmod.exitCode !== 0) return await refuse(`chmod failed: ${chmod.stderr.trim()}`)
+    const me = await run(['id', '-u'])
+    let owner = await run(['stat', '-f', '%u', where.realPath!]).catch(() => undefined)
+    if (owner === undefined || owner.exitCode !== 0 || !/^\d+$/.test(owner.stdout.trim())) owner = await run(['stat', '-c', '%u', where.realPath!])
+    if (me.exitCode !== 0 || owner.stdout.trim() !== me.stdout.trim()) {
+      return await refuse(`the folder is owned by user ${owner.stdout.trim() || '?'}, not ${me.stdout.trim() || '?'}`)
+    }
     cacheDir = where.realPath
-  } catch {
-    // no cache: pictures and browser pages are unavailable
+    cacheError = undefined
+    return cacheDir
+  } catch (error) {
+    return await refuse(String(error))
   }
-  return cacheDir
 }
 
 /** True when `path` is a regular file, not a link, inside the cache folder. */
@@ -421,7 +435,7 @@ export const register: Register = (on, options) => {
     if ('error' in picked) return { text: `${picked.error} Run /${COMMAND} list.` }
     const { diagram } = picked
     const page = await viewPage($, diagram)
-    if (page === undefined) return { text: 'Could not write the browser page: no private cache folder.' }
+    if (page === undefined) return { text: `Could not write the browser page: no private cache folder (${cacheError?.reason ?? 'unknown reason'}). It is retried in 30 s.` }
     const failed = await openInBrowser($, page)
     return { text: failed === undefined ? `Opened ${diagram.kind} ${diagram.id} in the browser.` : `Could not open the browser: ${failed}` }
   })
