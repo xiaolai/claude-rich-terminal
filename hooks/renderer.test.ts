@@ -44,6 +44,18 @@ test('a state outside a composite state is drawn outside it, and the composite k
   expect(find(lines, 'LeftToRight').row).toBeGreaterThan(top)
 })
 
+test('an ER edge beside a shorter entity reaches that entity', () => {
+  const lines = draw(`erDiagram
+    INSTALL }o--|| PROJECT : scopes
+    INSTALL {
+        string scope
+        string installPath
+    }`)
+  const row = lines[find(lines, 'PROJECT').row] ?? ''
+  // The cell left of PROJECT's border carries the edge, not a gap.
+  expect(row).toMatch(/[─│╢○]│ PROJECT │/)
+})
+
 test('class attributes are shown as written, in either Mermaid form', () => {
   const lines = draw(`classDiagram
     class Picture {

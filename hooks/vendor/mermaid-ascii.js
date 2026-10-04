@@ -6024,6 +6024,11 @@ function Sa(e2, t2, n2, r) {
     let r2 = e3.identifying ? M4 : N3, i2 = e3.identifying ? ae3 : P3, a3 = t3.x + Math.floor(t3.width / 2), s2 = t3.y + Math.floor(t3.height / 2), l2 = n3.x + Math.floor(n3.width / 2), u3 = n3.y + Math.floor(n3.height / 2);
     if (Math.abs(s2 - u3) < Math.max(t3.height, n3.height)) {
       let [s3, u4] = a3 < l2 ? [t3, n3] : [n3, t3], [f3, p4] = a3 < l2 ? [e3.cardinality1, e3.cardinality2] : [e3.cardinality2, e3.cardinality1], m4 = s3.x + s3.width, h4 = u4.x - 1, g4 = s3.y + Math.floor(s3.height / 2), _4;
+      // rich-terminal patch: the edge row must lie inside both boxes; beside a shorter box, use the rows they share.
+      {
+        let lo = Math.max(s3.y, u4.y) + 1, hi = Math.min(s3.y + s3.height, u4.y + u4.height) - 2;
+        (g4 < lo || g4 > hi) && lo <= hi && (g4 = Math.floor((lo + hi) / 2));
+      }
       for (let e4 of v2.values()) e4 !== s3 && e4 !== u4 && e4.y === s3.y && e4.x < h4 + 1 && e4.x + e4.width > m4 && (_4 = Math.max(_4 ?? 0, e4.y + e4.height));
       let y4 = h4 - m4 + 1, b4 = +(y4 >= d2 + 1), x4 = ya(f3, o, false), ee4 = ya(p4, o, true), w3 = +(y4 >= 3 && x4[0] === ae3), E3 = +(y4 >= 3 && ee4[ee4.length - 1] === ae3), D4 = m4 + w3, k3 = h4 - E3, A4;
       if (_4 === void 0) {
