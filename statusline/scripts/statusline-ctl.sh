@@ -11,7 +11,7 @@
 #   bar     toggle ████░░ gauges <-> lean percentages
 #   account toggle the account segment
 #   reset   toggle reset countdowns after 5h/7d
-#   weather toggle Token Weather (forecast icon + sparkline) on the context gauge
+#   weather toggle the Token Weather icon on the context gauge
 #   icons   toggle the weather icons between standard Unicode and Nerd Font glyphs
 #   status  print every setting; changes nothing
 #

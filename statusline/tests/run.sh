@@ -240,7 +240,7 @@ out=$(printf '{"workspace":{"current_dir":"%s","project_dir":"%s"}}' "$r" "$r" |
 case "$out" in *+1*) ok ;; *) bad "git-hardened-diff" "diff stat missing: $out" ;; esac
 rm -rf "$r" "$h"
 
-# Contract: Token Weather. One HOME across renders, so the history persists.
+# Contract: Token Weather.
 WX_STATE=${DEF_STATE/SHOW_WEATHER=0/SHOW_WEATHER=1}
 h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$WX_STATE" > "$h/.claude/statusline.state"
 wx() { printf '{"session_id":"%s","context_window":{"used_percentage":%s}}' "$1" "$2" | HOME="$h" bash "$CMD" 2>/dev/null | strip_ansi; }
@@ -248,19 +248,9 @@ for pc in "10 ☀" "30 ☁" "60 ☂" "80 ☇" "95 ↯"; do
   o=$(wx "icons-${pc% *}" "${pc% *}")
   case "$o" in *"${pc#* } ctx ${pc% *}%"*) ok ;; *) bad "wx-icon-${pc% *}" "$o" ;; esac
 done
-o=$(wx s1 10); case "$o" in *"ctx 10%"[▁-█]*) bad "wx-first" "sparkline from one reading: $o" ;; *) ok ;; esac
-wx s1 10 >/dev/null; o=$(wx s1 40)
-case "$o" in *"ctx 40% ▂█"*) ok ;; *) bad "wx-spark" "repeat recorded or bars wrong: $o" ;; esac
-for i in $(seq 1 20); do wx s2 "$i" >/dev/null; done
-[ "$(wc -w < "$h/.claude/.statusline-weather/s2" | tr -d ' ')" = 12 ] && ok || bad "wx-cap" "history not capped at 12"
-# A tampered history file: arithmetic injection and non-numbers are dropped, nothing runs.
-printf '%s\n' 'a[$(>'"$h"'/pwned)] 50 999 -3 x 70' > "$h/.claude/.statusline-weather/s3"
-o=$(wx s3 90)
-[ ! -e "$h/pwned" ] && ok || bad "wx-inject" "history value ran a command"
-case "$o" in *"ctx 90% "[▁-█][▁-█][▁-█]) ok ;; *) bad "wx-tampered" "$o" ;; esac
-# A session id that is not a plain token keeps no history and writes nowhere.
-wx '../../escape' 20 >/dev/null
-[ ! -e "$h/escape" ] && [ ! -e "$h/.claude/escape" ] && ok || bad "wx-sid" "session id named a path"
+# The icon alone: nothing after the figure, and nothing written to disk.
+o=$(wx s1 40); case "$o" in *"☁ ctx 40%") ok ;; *) bad "wx-icon-only" "$o" ;; esac
+[ "$(ls -A "$h/.claude")" = "statusline.state" ] && ok || bad "wx-no-files" "$(ls -A "$h/.claude" | tr '\n' ' ')"
 # ICONS=nerd: Nerd Font weather glyphs, as bytes, under the stock macOS bash 3.2 too.
 printf '%s' "${WX_STATE/ICONS=unicode/ICONS=nerd}" > "$h/.claude/statusline.state"
 for sh in bash /bin/bash; do
@@ -269,7 +259,7 @@ for sh in bash /bin/bash; do
     case "$hex" in *"${pc#* }"*) ok ;; *) bad "wx-nerd-$sh-${pc% *}" "glyph bytes missing" ;; esac
   done
 done
-# Off: no icon, no sparkline.
+# Off: no icon.
 printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
 o=$(wx s1 40); [ "$o" = "~ > Claude > ctx 40%" ] && ok || bad "wx-off" "$o"
 rm -rf "$h"
@@ -281,6 +271,14 @@ so=$(HOME="$h" bash "$CTL" status 2>/dev/null); rc=$?
 [ "$rc" = 0 ] && ok || bad "ctl-status-rc" "exit $rc"
 [ "$so" = "status line → look=plain · lines=1 · visible · bar=off · account=name · reset=off · weather=off · icons=unicode" ] && ok || bad "ctl-status-out" "$so"
 [ "$(cat "$h/.claude/statusline.state")" = "$before" ] && ok || bad "ctl-status-write" "status changed the state file"
+rm -rf "$h"
+
+# Contract: the git budgets come from the environment and must never run code.
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
+for var in GIT_TOTAL GIT_BUDGET; do
+  printf '{"workspace":{"current_dir":"%s"}}' "$HERE" | env HOME="$h" "$var=a[\$(>$h/pwned-$var)]" bash "$CMD" >/dev/null 2>&1
+  [ ! -e "$h/pwned-$var" ] && ok || bad "env-inject-$var" "$var ran a command"
+done
 rm -rf "$h"
 
 # ── Summary ──────────────────────────────────────────────────────────────────

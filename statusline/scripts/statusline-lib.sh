@@ -21,8 +21,7 @@
 #   ACCOUNT_LOCAL  1 truncates the account email at "@"
 #   SHOW_ACCOUNT   0 hides the account segment
 #   SHOW_RESET     1 appends rate-limit reset countdowns
-#   SHOW_WEATHER   1 adds Token Weather to the context gauge: a forecast icon
-#                  and a sparkline of the session's recent context fill
+#   SHOW_WEATHER   1 leads the context gauge with a Token Weather forecast icon
 #   ICONS          nerd draws the weather icons from a Nerd Font, which sizes
 #                  them to one cell; unicode uses standard symbols that most
 #                  fonts lack, so the terminal borrows them from another font

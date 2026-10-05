@@ -418,7 +418,7 @@ A status line under the prompt, here in the three-row layout (`/rich status line
 
 ```
 ~/myproject/src > main ↑1 +12 -3 ?2
-Fable · xhigh > ☁ ctx 42% ▁▂▃▅█ > 12m · $1.23
+Fable · xhigh > ☁ ctx 42% > 12m · $1.23
 xiaolai > 5h 12% · 7d 67%
 ```
 
@@ -443,7 +443,7 @@ The context and limit gauges share one color scale: green below 60 %, amber from
 
 ### Token Weather
 
-The context gauge is led by a forecast icon and followed by a sparkline of the session's last 12 readings, scaled to the fullest: `☁ ctx 42% ▁▂▃▅█`.
+The context gauge is led by a forecast icon: `☁ ctx 42%`.
 
 | Context fill | Icon | Nerd Font glyph (`icons`) | Forecast |
 | --- | --- | --- | --- |
@@ -453,9 +453,7 @@ The context gauge is led by a forecast icon and followed by a sparkline of the s
 | 75–89 % | ☇ | U+E31D `weather-thunderstorm` | Storm |
 | 90 % and up | ↯ | U+E351 `weather-tornado` | Compact soon |
 
-A reading is recorded whenever the fill changes, so a turn with several tool calls can add several; the sparkline appears from the second. Readings are kept per session in `~/.claude/.statusline-weather/`, and a new session sweeps files older than a week.
-
-The standard symbols are missing from most coding fonts, so the terminal borrows them from a fallback font and they can look out of place. With a Nerd Font, `/rich status icons` switches to its weather glyphs, one cell wide in a Mono variant. The sparkline bars are block elements, which Ghostty, kitty and most modern terminals draw to fill the cell exactly.
+The standard symbols are missing from most coding fonts, so the terminal borrows them from a fallback font and they can look out of place. With a Nerd Font, `/rich status icons` switches to its weather glyphs, one cell wide in a Mono variant.
 
 ### Status line settings
 
@@ -470,7 +468,7 @@ The standard symbols are missing from most coding fonts, so the terminal borrows
 | `bar` | `SHOW_BAR` | `0` | Context as a `████░░` gauge instead of `ctx N%` |
 | `account` | `SHOW_ACCOUNT` | `1` | Show or hide the account; `ACCOUNT_LOCAL=0` in the file shows the whole email |
 | `reset` | `SHOW_RESET` | `0` | Reset countdowns after the 5h/7d figures |
-| `weather` | `SHOW_WEATHER` | `1` | Token Weather on the context gauge |
+| `weather` | `SHOW_WEATHER` | `1` | The Token Weather icon on the context gauge |
 | `icons` | `ICONS` | `unicode` | Weather icons: standard symbols, or Nerd Font glyphs (`nerd`) |
 
 Powerline gradients run across each row's segments: gray `#4a4a4a` → `#1e1e1e`, aurora `#1e2a4a` → `#52304f`, sunset `#241f42` → `#5e3040`, forest `#163a34` → `#2c3a55`. The foreground colors carry meaning in both styles: green clean/ahead/low, amber dirty/behind/mid, red deletions/high, blue path, purple model, gold cost.
@@ -485,12 +483,11 @@ flowchart LR
     CTL -->|"rewrites"| ST["~/.claude/statusline.state"]
     ST -.->|"read on every render"| R
     G["git, time-bounded"] -.->|"branch and diff"| R
-    R -.->|"reads and appends readings"| WX["~/.claude/.statusline-weather/"]
 ```
 
 Claude Code runs the `statusLine` command on every status update and pipes it a JSON payload, which the renderer parses with `jq`. `/rich status` runs the controller from the plugin itself; it rewrites the state file through a temp file and an atomic rename. `LINES=auto` reads the terminal's width from `/dev/tty`, since the payload carries none, and falls back to three rows where that fails.
 
-Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, default 3 s): Claude Code blanks a status line that takes 5 s, so a slow repository loses only its git segments. Git runs nothing a repository's config names: every call passes `-c core.fsmonitor=false`, and the diff passes `--no-ext-diff --no-textconv`. Set either budget in the command, e.g. `GIT_BUDGET=1 bash ~/.claude/statusline-command.sh`.
+Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, default 3 s): Claude Code blanks a status line that takes 5 s, so a slow repository loses only its git segments. Git runs nothing a repository's config names: every call passes `-c core.fsmonitor=false`, and the diff passes `--no-ext-diff --no-textconv`. Set either budget, 1 to 60 whole seconds, in the command, e.g. `GIT_BUDGET=1 bash ~/.claude/statusline-command.sh`; any other value is ignored.
 
 ### Requirements
 
@@ -512,12 +509,11 @@ Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, d
 | Nearly empty line | `jq` is missing |
 | Boxes instead of arrows | a powerline look without the U+E0B0 glyph: use a Nerd Font, or `/rich status style` for plain |
 | Weather icon looks out of place | the font lacks the symbol: with a Nerd Font, `/rich status icons` |
-| No sparkline yet | it needs two readings with different fills |
 | Toggle seems to do nothing | the line redraws on the next status update: send a message or wait |
 | `lines auto` always gives 3 rows | `/dev/tty` is not readable here: choose `1`, `2` or `3` |
 | `check` says customized | you or another tool edited that copy, so updates leave it alone; `/rich status setup` replaces it |
 
-To remove it: delete the `statusLine` key from `settings.json`, then the copied `statusline-*.sh`, `statusline.state`, `.statusline-account` and `.statusline-weather/` in `~/.claude/`.
+To remove it: delete the `statusLine` key from `settings.json`, then the copied `statusline-*.sh`, `statusline.state` and `.statusline-account` in `~/.claude/` (and `.statusline-weather/`, if an earlier version left one).
 
 ## Commands
 

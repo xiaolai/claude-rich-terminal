@@ -3,7 +3,7 @@
 #
 # Segments, each shown only when it has data, grouped for multi-line layouts:
 #   group A:  cwd | git branch ↑↓ | git diff +ins -del ?untracked
-#   group B:  model · effort | weather ctx % sparkline | time · $cost
+#   group B:  model · effort | weather ctx % | time · $cost
 #   group C:  account | 5h% · 7d% usage
 #
 # STYLE=powerline → filled gradient backgrounds + solid  arrows
@@ -175,6 +175,10 @@ fmt_reset() {
 # once the budget is gone.
 GIT_BUDGET=${GIT_BUDGET:-2}
 GIT_TOTAL=${GIT_TOTAL:-3}
+# Both come from the environment and GIT_TOTAL feeds $(( )), where bash runs a
+# crafted value such as a[$(cmd)]. Anything but 1-60 whole seconds is the default.
+case "$GIT_BUDGET" in [1-9]|[1-5][0-9]|60) ;; *) GIT_BUDGET=2 ;; esac
+case "$GIT_TOTAL" in [1-9]|[1-5][0-9]|60) ;; *) GIT_TOTAL=3 ;; esac
 if command -v timeout >/dev/null 2>&1; then
   _bounded() { local s=$1; shift; timeout "$s" "$@"; }
 elif command -v perl >/dev/null 2>&1; then
@@ -335,10 +339,7 @@ mtext="\033[38;2;${MODEL_FG}m${model}"
 [ -n "$effort" ] && mtext="$mtext\033[38;2;${TIME_FG}m · \033[38;2;${EFFORT_FG}m${effort}"
 add 2 "$mtext"
 
-# ── Token Weather: a forecast icon and a sparkline of the context fill ──
-# The history is one line of whole percentages per session, oldest first,
-# appended whenever the fill changes and capped at WX_KEEP readings.
-WX_DIR="$HOME/.claude/.statusline-weather"; WX_KEEP=12
+# ── Token Weather: a forecast icon for the context fill ───────────────
 # wx_icon <pct> -> "icon|R;G;B": Clear, Cloudy, Showers, Storm, Compact soon.
 # ICONS=nerd takes Nerd Font weather glyphs (day_sunny, cloudy, showers,
 # thunderstorm, tornado), one cell wide in a Mono variant; the standard
@@ -356,41 +357,6 @@ wx_icon() {
   elif [ "$1" -lt 90 ]; then printf '%s|180;142;173' "${WX_ICONS[3]}"
   else printf '%s|224;108;117' "${WX_ICONS[4]}"; fi
 }
-# wx_history <session_id> <pct> -> the kept readings, after recording <pct>
-# when it differs from the last one. The file is outside input: every value
-# is checked to be 0-100 digits BEFORE it can reach arithmetic, since bash
-# arithmetic on a crafted string (a[$(cmd)]) runs commands. `read -a` splits
-# without globbing. A session id that is not a plain token keeps no history,
-# so it can never name a path outside WX_DIR.
-wx_history() {
-  local sid=$1 p=$2 f raw=() vals=() v tmp
-  case "$sid" in ''|*[!A-Za-z0-9_-]*) printf '%s' "$p"; return 0 ;; esac
-  [ "${#sid}" -le 128 ] || { printf '%s' "$p"; return 0; }
-  f="$WX_DIR/$sid"
-  [ -f "$f" ] && read -r -a raw < <(head -c 1024 "$f" 2>/dev/null)
-  for v in ${raw[@]+"${raw[@]}"}; do
-    case "$v" in ''|*[!0-9]*) continue ;; esac
-    [ "${#v}" -le 3 ] && [ "$v" -le 100 ] && vals+=("$v")
-  done
-  if [ "${#vals[@]}" -eq 0 ] || [ "${vals[${#vals[@]}-1]}" != "$p" ]; then
-    vals+=("$p")
-    [ "${#vals[@]}" -gt "$WX_KEEP" ] && vals=("${vals[@]:${#vals[@]}-WX_KEEP}")
-    # Same pattern as the account cache: the temp file lives in $TMPDIR, so a
-    # render killed mid-write leaves no orphan in ~/.claude.
-    if mkdir -p "$WX_DIR" 2>/dev/null && tmp=$(mktemp "${TMPDIR:-/tmp}/statusline-weather.XXXXXX" 2>/dev/null); then
-      [ -f "$f" ] || find "$WX_DIR" -type f -mtime +7 -delete 2>/dev/null   # a new session sweeps week-old ones
-      { printf '%s\n' "${vals[*]}" > "$tmp" && mv "$tmp" "$f"; } 2>/dev/null || rm -f "$tmp"
-    fi
-  fi
-  printf '%s' "${vals[*]}"
-}
-# wx_spark <pct...> -> one bar per reading, scaled to the fullest.
-wx_spark() {
-  local max=1 v out="" bars=(▁ ▂ ▃ ▄ ▅ ▆ ▇ █)
-  for v in "$@"; do [ "$v" -gt "$max" ] && max=$v; done
-  for v in "$@"; do out+="${bars[$(( v * 7 / max ))]}"; done
-  printf '%s' "$out"
-}
 
 # ── group B: context (ctx parsed above) ───────────────────────────────
 if [ -n "$ctx" ]; then
@@ -399,10 +365,7 @@ if [ -n "$ctx" ]; then
   if [ "$SHOW_BAR" = "1" ]; then ctxstr="$(mk_bar "$ci") ${ci}%"; else ctxstr="ctx ${ci}%"; fi
   if [ "$SHOW_WEATHER" = "1" ]; then
     wx=$(wx_icon "$ci")
-    read -r -a wxh <<< "$(wx_history "$(jqr '.session_id // ""')" "$ci")"
-    wtext="\033[38;2;${wx#*|}m${wx%%|*} \033[38;2;${cfg}m${ctxstr}"
-    [ "${#wxh[@]}" -ge 2 ] && wtext+=" $(wx_spark "${wxh[@]}")"
-    add 2 "$wtext"
+    add 2 "\033[38;2;${wx#*|}m${wx%%|*} \033[38;2;${cfg}m${ctxstr}"
   else
     add 2 "\033[38;2;${cfg}m${ctxstr}"
   fi
