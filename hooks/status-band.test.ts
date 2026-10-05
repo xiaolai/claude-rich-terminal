@@ -14,7 +14,10 @@ type World = {
 }
 
 /** The session, git and the account beneath the plugin. */
-function world(on: On, store: Record<string, unknown> = {}): { w: World; clock: MockClock; kept: Map<string, unknown> } {
+/** The full band unless a test says otherwise: most tests look at every group. */
+const FULL = { statusSettings: { rows: 'all' } }
+
+function world(on: On, store: Record<string, unknown> = FULL): { w: World; clock: MockClock; kept: Map<string, unknown> } {
   const clock = mock.clock(on, { now: START })
   const w: World = {
     tokens: 84_000,
@@ -169,13 +172,13 @@ test('/rich status changes the band at once and keeps the change', { timeoutMs: 
 
   await rich($, 'status off')
   expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
-  expect((await rich($, 'status')).text).toBe('status band off · look aurora · lines 3 · bar off · account name · resets off · weather off')
+  expect((await rich($, 'status')).text).toBe('status band off · rows all · look aurora · lines 3 · bar off · account name · resets off · weather off')
   expect((await rich($, 'status look neon')).text).toContain('look takes plain, gray, aurora, sunset, forest')
   await ui.unmount()
 })
 
 test('kept settings apply from the session start', { timeoutMs: 60_000 }, async ($, on) => {
-  const { clock } = world(on, { statusSettings: { look: 'plain', account: 'email', resets: true, weather: false } })
+  const { clock } = world(on, { statusSettings: { rows: 'all', look: 'plain', account: 'email', resets: true, weather: false } })
   await start($, clock)
   const ui = await band($)
   expect((await rows(ui))[0]).toContain('me@example.com > 5h 12% (3h) · 7d 67% (2d5h)')
@@ -237,6 +240,27 @@ test('a non-interactive session reads nothing for a band no one sees', { timeout
   await clock.advance(30_000)
   expect(w.gitCalls).toEqual([])
   const ui = await band($)
+  expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('by default the band is Token Weather alone, and git and the account are not read for it', { timeoutMs: 60_000 }, async ($, on) => {
+  const { w, clock } = world(on, {})
+  engineBand(on)
+  await start($, clock)
+  await clock.advance(10_000)
+  const ui = await band($)
+  expect(await rows(ui)).toEqual(['☁  Cloudy > 42% of context  84k / 200k > last turns █'])
+  expect(w.gitCalls).toEqual([])
+
+  expect((await rich($, 'status rows all')).text).toContain('rows all')
+  await clock.settle()
+  expect((await rows(ui)).length).toBe(2)
+  expect(w.gitCalls.length > 0).toBe(true)
+
+  // Weather alone with the weather off leaves nothing: the engine's band shows.
+  await rich($, 'status rows weather')
+  await rich($, 'status weather off')
   expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
   await ui.unmount()
 })

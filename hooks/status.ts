@@ -1,15 +1,17 @@
 // The status band: what it shows and how it is laid out, with no engine in it.
 
-import type { StatusAccount, StatusData, StatusLines, StatusLook, StatusSettings, TokenReading } from '../types'
+import type { StatusAccount, StatusData, StatusLines, StatusLook, StatusRows, StatusSettings, TokenReading } from '../types'
 
 import { cells } from './core.ts'
 
 export const LOOKS: readonly StatusLook[] = ['plain', 'gray', 'aurora', 'sunset', 'forest']
 export const LINES: readonly StatusLines[] = ['auto', '1', '2', '3']
 export const ACCOUNTS: readonly StatusAccount[] = ['name', 'email', 'off']
+export const ROWS: readonly StatusRows[] = ['weather', 'all']
 
 export const DEFAULT_SETTINGS: StatusSettings = {
   visible: true,
+  rows: 'weather',
   look: 'plain',
   lines: 'auto',
   bar: false,
@@ -26,6 +28,7 @@ export function settingsFrom(value: unknown): StatusSettings {
   const d = DEFAULT_SETTINGS
   return {
     visible: flag(v.visible, d.visible),
+    rows: one(ROWS, v.rows, d.rows),
     look: one(LOOKS, v.look, d.look),
     lines: one(LINES, v.lines, d.lines),
     bar: flag(v.bar, d.bar),
@@ -37,12 +40,13 @@ export function settingsFrom(value: unknown): StatusSettings {
 
 export function describeSettings(s: StatusSettings): string {
   const onOff = (b: boolean) => (b ? 'on' : 'off')
-  return `status band ${onOff(s.visible)} · look ${s.look} · lines ${s.lines} · bar ${onOff(s.bar)} · account ${s.account} · resets ${onOff(s.resets)} · weather ${onOff(s.weather)}`
+  return `status band ${onOff(s.visible)} · rows ${s.rows} · look ${s.look} · lines ${s.lines} · bar ${onOff(s.bar)} · account ${s.account} · resets ${onOff(s.resets)} · weather ${onOff(s.weather)}`
 }
 
 export const STATUS_HELP = [
   '/rich status                 show the status band settings',
   '/rich status on | off        show or hide the band above the prompt',
+  '/rich status rows [which]    weather (only Token Weather) or all; none cycles',
   '/rich status look [name]     plain, gray, aurora, sunset or forest; none cycles',
   '/rich status lines [n]       auto, 1, 2 or 3 rows; none cycles',
   '/rich status account [show]  name, email or off; none cycles',
@@ -53,7 +57,7 @@ export type StatusCommand = { kind: 'show' } | { kind: 'set'; settings: StatusSe
 
 /**
  * `/rich status` and its settings: no value cycles or toggles, a value sets.
- * `look`, `lines` and `account` cycle through their values in the order listed.
+ * `rows`, `look`, `lines` and `account` cycle through their values in the order listed.
  */
 export function statusCommand(words: readonly string[], current: StatusSettings): StatusCommand {
   const [what, value, ...rest] = words
@@ -72,6 +76,8 @@ export function statusCommand(words: readonly string[], current: StatusSettings)
   const apply = <T>(picked: T | { reason: string }, patch: (x: T) => Partial<StatusSettings>): StatusCommand =>
     typeof picked === 'object' && picked !== null && 'reason' in picked ? { kind: 'invalid', reason: picked.reason } : set(patch(picked as T))
   switch (what) {
+    case 'rows':
+      return apply(choose(ROWS, current.rows), rows => ({ rows }))
     case 'look':
       return apply(choose(LOOKS, current.look), look => ({ look }))
     case 'lines':
@@ -341,8 +347,9 @@ export function rowWidth(row: readonly Segment[], look: StatusLook): number {
   return text + (look === 'plain' ? (row.length - 1) * 3 : row.length * 3)
 }
 
-/** The rows to draw: A, B and C on one, two or three lines (auto picks the fewest that fit), then the weather. */
+/** The rows to draw: A, B and C on one, two or three lines (auto picks the fewest that fit), then the weather; only the weather with `rows weather`. */
 export function layout(groups: Groups, s: StatusSettings, columns: number): Segment[][] {
+  if (s.rows === 'weather') return [groups.weather].filter(row => row.length > 0)
   const { a, b, c } = groups
   let lines = s.lines
   if (lines === 'auto') {

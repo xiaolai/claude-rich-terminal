@@ -4,11 +4,14 @@ export type RichTerminalEnabled = boolean
 export type StatusLook = 'plain' | 'gray' | 'aurora' | 'sunset' | 'forest'
 /** How the band's three groups share rows: `auto` takes the fewest that fit. */
 export type StatusLines = 'auto' | '1' | '2' | '3'
+/** What the band draws: only the Token Weather row (a statusLine command can show the rest under the prompt), or every group. */
+export type StatusRows = 'weather' | 'all'
 /** The account segment: the email's local part, the whole email, or hidden. */
 export type StatusAccount = 'name' | 'email' | 'off'
 
 export type StatusSettings = {
   visible: boolean
+  rows: StatusRows
   look: StatusLook
   lines: StatusLines
   bar: boolean

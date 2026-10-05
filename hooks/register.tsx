@@ -409,7 +409,9 @@ async function collect($: EngineInterface, s: StatusSettings): Promise<StatusDat
   const [usage, cwd, root, home, turn] = await Promise.all([$.session.usage(), $.session.cwd(), $.session.root(), $.env.get('HOME'), read($, turnModel)])
   const now = await $.clock.now()
   const model = turn?.model ?? (await $.session.model().then(shortModel, () => undefined))
-  const [git, label] = await Promise.all([gitState($, cwd), s.account === 'off' ? undefined : accountLabel($, home, now)])
+  // Only the weather row is drawn with `rows weather`: git and the account are not read for it.
+  const isFull = s.rows === 'all'
+  const [git, label] = await Promise.all([isFull ? gitState($, cwd) : undefined, isFull && s.account !== 'off' ? accountLabel($, home, now) : undefined])
   const { tokens, window, percent } = usage.context
   return {
     cwd,

@@ -101,8 +101,9 @@ test('figures format as the status line drew them', () => {
 
 test('stored settings are taken field by field; a bad value keeps its default', () => {
   expect(settingsFrom(undefined)).toEqual(DEFAULT_SETTINGS)
-  expect(settingsFrom({ look: 'aurora', lines: '2', bar: 'yes', account: 'nobody', weather: false })).toEqual({
+  expect(settingsFrom({ rows: 'all', look: 'aurora', lines: '2', bar: 'yes', account: 'nobody', weather: false })).toEqual({
     ...DEFAULT_SETTINGS,
+    rows: 'all',
     look: 'aurora',
     lines: '2',
     weather: false,
@@ -118,6 +119,9 @@ test('status commands show, cycle, toggle and set; anything else is refused', ()
   }
   expect(statusCommand([], s)).toEqual({ kind: 'show' })
   expect(set(['off']).visible).toBe(false)
+  expect(set(['rows']).rows).toBe('all')
+  expect(set(['rows', 'weather'], { ...s, rows: 'all' }).rows).toBe('weather')
+  expect(statusCommand(['rows', 'some'], s)).toEqual({ kind: 'invalid', reason: 'rows takes weather, all' })
   expect(set(['look']).look).toBe('gray')
   expect(set(['look'], { ...s, look: 'forest' }).look).toBe('plain')
   expect(set(['look', 'sunset']).look).toBe('sunset')
@@ -171,7 +175,7 @@ test('a figure the engine does not have hides its segment instead of showing a b
 })
 
 test('auto lines takes the fewest rows that fit, measured as drawn', () => {
-  const s = DEFAULT_SETTINGS
+  const s: StatusSettings = { ...DEFAULT_SETTINGS, rows: 'all' }
   const g = bandGroups(DATA, [], { ...s, weather: false }, 200)
   const one = rowWidth([...g.a, ...g.b, ...g.c], 'plain')
   expect(layout(g, s, one).length).toBe(1)
@@ -186,6 +190,9 @@ test('auto lines takes the fewest rows that fit, measured as drawn', () => {
   // The weather is always its own last row.
   const w = bandGroups(DATA, [], s, 500)
   expect(layout(w, s, 500).at(-1)).toBe(w.weather)
+  // Weather alone by default.
+  expect(layout(w, DEFAULT_SETTINGS, 500)).toEqual([w.weather])
+  expect(layout({ ...w, weather: [] }, DEFAULT_SETTINGS, 500)).toEqual([])
 })
 
 test('the weather follows the forecast bands, and the sparkline scales to the fullest turn', () => {

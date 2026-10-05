@@ -1,6 +1,6 @@
 # Claude Rich Terminal
 
-Mermaid diagrams drawn inside Claude Code replies, instead of raw source, and a status band above the prompt with a Token Weather forecast of the context window.
+Mermaid diagrams drawn inside Claude Code replies, instead of raw source, and a Token Weather band above the prompt that forecasts the context window, with an optional full status.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/demo-dark.gif">
@@ -15,8 +15,8 @@ The diagram in the animation is the plugin's own output: its text drawing, then 
 - **Fits the terminal.** A left-to-right flowchart too wide for the window is redrawn top-to-bottom. If it still does not fit, the source is shown. Changing the terminal's width redraws.
 - **Optional pictures.** In Ghostty or kitty, diagrams can be drawn as real images instead (see [Settings](#settings)).
 - **Full view in the browser.** `/rich open` opens a diagram as a zoomable page that works offline.
-- **Status band.** Above the prompt: the folder and git state, model and effort, session time and cost, account and rate limits, restyled live with `/rich status` (see [Status band](#status-band)).
-- **Token Weather.** The band's last row forecasts the context window, from ☀ Clear to ↯ Compact soon, with a sparkline of recent turns.
+- **Token Weather.** A band above the prompt forecasts the context window, from ☀ Clear to ↯ Compact soon, with a sparkline of recent turns.
+- **Status band.** With `/rich status rows all`, the band also shows the folder and git state, model and effort, session time and cost, account and rate limits, restyled live with `/rich status` (see [Status band](#status-band)).
 
 Terminal drawings cover flowcharts, sequence, state, class, ER and xy charts. Other types (pie, gantt, mindmap, timeline, gitGraph, journey) stay as source, unless pictures are on.
 
@@ -415,7 +415,13 @@ journey
 
 ## Status band
 
-A band above the prompt, drawn by the plugin in interactive terminal sessions. In the default `plain` look, at a width where everything fits on one row:
+A band above the prompt, drawn by the plugin in interactive terminal sessions. By default it is Token Weather alone, one row:
+
+```
+☂  Showers > 67% of context  134.4k / 200k > last turns ▁▂▃▅█  ▲ +98.3k last turn
+```
+
+That default suits a setup with a `statusLine` command, which Claude Code draws under the prompt. A plugin cannot draw there itself: its only slot under the prompt is a one-line notice without color. Without a `statusLine` command, `/rich status rows all` adds the full status above the weather. In the default `plain` look, at a width where everything fits on one row:
 
 ```
 my-app/src > main ↑1 > +12 -3 ?2 > Opus · xhigh > 12m · $1.23 > me > 5h 12% · 7d 67%
@@ -438,9 +444,9 @@ The other looks (`gray`, `aurora`, `sunset`, `forest`) draw each segment on a ba
 
 A segment with no data is left out. The context and limit figures share one scale: green below 60 %, amber from 60 %, red from 85 %. `lines auto` puts groups A, B and C on the fewest rows that fit the band's width.
 
-The figures are read every 5 seconds and after each model request. Git gets a 3-second budget per reading (2 seconds a call): a slow repository loses its git segments, never the band. Nothing is read in `claude -p` runs or outside a terminal.
+The figures are read every 5 seconds and after each model request; with `rows weather`, only the session's own figures, never git or the account. Git gets a 3-second budget per reading (2 seconds a call): a slow repository loses its git segments, never the band. Nothing is read in `claude -p` runs or outside a terminal.
 
-The band sits above the prompt; Claude Code's own `statusLine` setting draws below it. If you also have a `statusLine` command, both show, so remove one of them.
+The band sits above the prompt; Claude Code's own `statusLine` setting draws below it. With `rows all` and a `statusLine` command, the same figures show twice.
 
 ## Commands
 
@@ -451,6 +457,7 @@ The band sits above the prompt; Claude Code's own `statusLine` setting draws bel
 | `/rich on` / `/rich off` | Draw diagrams, or leave replies as Claude Code draws them |
 | `/rich status` | Show the status band's settings |
 | `/rich status on` / `off` | Show or hide the band |
+| `/rich status rows [which]` | `weather` (Token Weather alone, the default) or `all` (every segment); without one, the other |
 | `/rich status look [name]` | `plain`, `gray`, `aurora`, `sunset` or `forest`; without a name, the next one |
 | `/rich status lines [n]` | `auto`, `1`, `2` or `3` rows for groups A, B and C; without one, the next |
 | `/rich status account [show]` | `name`, `email` or `off`; without one, the next |
