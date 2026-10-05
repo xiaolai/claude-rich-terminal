@@ -34,11 +34,17 @@ export function statusLineCommand(dir: string): string {
   return `bash "${dir}/statusline-command.sh"`
 }
 
-/** Whether a statusLine setting runs the renderer copied into `dir`, quoted or not. */
+/**
+ * Whether a statusLine setting runs the renderer copied into `dir`, quoted or
+ * not: the path must be a whole argument, so `statusline-command.sh.old` or a
+ * longer folder name ending in the same path does not count.
+ */
 export function runsOurRenderer(statusLine: unknown, dir: string): boolean {
   if (typeof statusLine !== 'object' || statusLine === null) return false
   const command = (statusLine as { command?: unknown }).command
-  return typeof command === 'string' && command.includes(`${dir}/statusline-command.sh`)
+  if (typeof command !== 'string') return false
+  const path = `${dir}/statusline-command.sh`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[\\s"'])${path}(["'\\s]|$)`).test(command)
 }
 
 /**

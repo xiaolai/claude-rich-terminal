@@ -33,6 +33,11 @@ test('the statusLine setting runs our renderer, quoted or not', () => {
   expect(runsOurRenderer({ command: 'bash /Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(true)
   expect(runsOurRenderer({ command: statusLineCommand('/Users/me/.claude') }, '/Users/me/.claude')).toBe(true)
   expect(runsOurRenderer({ command: 'bash /elsewhere/statusline-command.sh' }, '/Users/me/.claude')).toBe(false)
+  expect(runsOurRenderer({ command: "bash '/Users/me/.claude/statusline-command.sh'" }, '/Users/me/.claude')).toBe(true)
+  expect(runsOurRenderer({ command: 'GIT_BUDGET=1 bash /Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(true)
+  // The path must be a whole argument.
+  expect(runsOurRenderer({ command: 'bash /Users/me/.claude/statusline-command.sh.old' }, '/Users/me/.claude')).toBe(false)
+  expect(runsOurRenderer({ command: 'bash /x/Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(false)
   expect(runsOurRenderer(undefined, '/d')).toBe(false)
   expect(runsOurRenderer({ command: 3 }, '/d')).toBe(false)
 })
