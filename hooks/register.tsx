@@ -23,6 +23,8 @@ import {
   viewerHtml,
 } from './core.ts'
 import type { Diagram, PageScripts } from './core.ts'
+import { describeCheck, EXECUTABLE, runsOurRenderer, SCRIPTS, scriptState, STATUS_HELP, statusCommand, withStatusLine } from './statusline.ts'
+import type { ScriptName, ScriptState } from './statusline.ts'
 import { renderMermaidAscii } from './vendor/mermaid-ascii.js'
 
 const COMMAND = 'rich'
@@ -38,6 +40,8 @@ const HELP = [
   '/rich on | off       draw diagrams in replies, or leave them as source',
   'With no number, the latest diagram is used.',
   'Diagram images (Ghostty, kitty): turn on "images" for this plugin in /config.',
+  '',
+  STATUS_HELP,
 ].join('\n')
 
 const CHROME_PATHS = [
@@ -322,6 +326,103 @@ async function openInBrowser($: EngineInterface, path: string): Promise<string |
   }
 }
 
+// ── The status line under the prompt ─────────────────────────────────
+
+/** What this plugin last copied into the config folder, per script: a copy still equal to it is the plugin's to replace. */
+const INSTALLED_KEY = 'statuslineInstalled'
+
+/** Claude Code's config folder, where settings.json and the copied scripts live. */
+async function configDir($: EngineInterface): Promise<string | undefined> {
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? (await $.env.get('HOME'))?.concat('/.claude')
+  return dir !== undefined && dir.startsWith('/') ? dir.replace(/\/+$/, '') : undefined
+}
+
+async function bundledScripts($: EngineInterface): Promise<Record<ScriptName, string>> {
+  const texts = await Promise.all(SCRIPTS.map(name => $.fs.read(`${$.plugin.root}/statusline/scripts/${name}`)))
+  return Object.fromEntries(SCRIPTS.map((name, i) => [name, texts[i]!])) as Record<ScriptName, string>
+}
+
+async function readOrNothing($: EngineInterface, path: string): Promise<string | undefined> {
+  try {
+    return await $.fs.read(path)
+  } catch {
+    return undefined
+  }
+}
+
+async function installedRecord($: EngineInterface): Promise<Partial<Record<ScriptName, string>>> {
+  const value: unknown = await $.store.get(INSTALLED_KEY)
+  if (typeof value !== 'object' || value === null) return {}
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(SCRIPTS.flatMap(name => (typeof record[name] === 'string' ? [[name, record[name]]] : []))) as Partial<Record<ScriptName, string>>
+}
+
+/** Copies the named scripts into `dir`, makes the two entry points executable and records what was copied. */
+async function copyScripts($: EngineInterface, dir: string, bundled: Record<ScriptName, string>, names: readonly ScriptName[]): Promise<void> {
+  for (const name of names) await $.fs.write(`${dir}/${name}`, bundled[name])
+  const executable = names.filter(name => EXECUTABLE.includes(name)).map(name => `${dir}/${name}`)
+  if (executable.length > 0) {
+    const chmod = await $.process.run(['chmod', '755', ...executable], { timeoutMs: SYSTEM_TIMEOUT_MS })
+    if (chmod.exitCode !== 0) throw new Error(`chmod failed: ${chmod.stderr.trim()}`)
+  }
+  await $.store.set(INSTALLED_KEY, { ...(await installedRecord($)), ...Object.fromEntries(names.map(name => [name, bundled[name]])) })
+}
+
+async function scriptStates($: EngineInterface, dir: string, bundled: Record<ScriptName, string>): Promise<Record<ScriptName, ScriptState>> {
+  const record = await installedRecord($)
+  const states = await Promise.all(SCRIPTS.map(async name => scriptState(bundled[name], await readOrNothing($, `${dir}/${name}`), record[name])))
+  return Object.fromEntries(SCRIPTS.map((name, i) => [name, states[i]!])) as Record<ScriptName, ScriptState>
+}
+
+/**
+ * Brings the copied scripts up to this plugin's version when the statusLine
+ * setting runs them: a missing or outdated copy is replaced, a current one is
+ * recorded as the plugin's, and a customized one is left alone.
+ */
+async function refreshStatusScripts($: EngineInterface): Promise<void> {
+  try {
+    const dir = await configDir($)
+    if (dir === undefined || !runsOurRenderer((await $.settings.read({ source: 'user' })).statusLine, dir)) return
+    const bundled = await bundledScripts($)
+    const states = await scriptStates($, dir, bundled)
+    const stale = SCRIPTS.filter(name => states[name] === 'missing' || states[name] === 'outdated')
+    const record = await installedRecord($)
+    const adopt = SCRIPTS.filter(name => states[name] === 'current' && record[name] !== bundled[name])
+    if (stale.length > 0 || adopt.length > 0) await copyScripts($, dir, bundled, [...stale, ...adopt])
+    if (stale.length > 0) $.ui.log(`rich-terminal: status line scripts updated: ${stale.join(', ')}`, { to: 'debug' })
+  } catch (error) {
+    $.ui.log(`rich-terminal: status line scripts not refreshed: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/** Answers `/rich status …`. */
+async function runStatus($: EngineInterface, words: readonly string[]): Promise<string> {
+  const command = statusCommand(words)
+  if (command.kind === 'invalid') return `${command.reason}\n${STATUS_HELP}`
+  if (command.kind === 'controller') {
+    // The bundled controller: it writes only the state file, which the copied renderer reads.
+    const ran = await $.process.run(['bash', `${$.plugin.root}/statusline/scripts/statusline-ctl.sh`, command.action], { timeoutMs: SYSTEM_TIMEOUT_MS })
+    return ran.exitCode === 0 ? ran.stdout.trim() : `The status line controller failed: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`
+  }
+  const dir = await configDir($)
+  if (dir === undefined) return 'No config folder: neither CLAUDE_CONFIG_DIR nor HOME is an absolute path.'
+  const bundled = await bundledScripts($)
+  const settingsPath = `${dir}/settings.json`
+  if (command.kind === 'check') {
+    const wired = runsOurRenderer((await $.settings.read({ source: 'user' })).statusLine, dir)
+    return describeCheck(await scriptStates($, dir, bundled), wired, dir)
+  }
+  let settings: string
+  try {
+    settings = withStatusLine((await readOrNothing($, settingsPath)) ?? '', dir)
+  } catch (error) {
+    return `${settingsPath} could not be read as JSON, so it was left alone: ${String(error)}`
+  }
+  await copyScripts($, dir, bundled, SCRIPTS)
+  await $.fs.write(settingsPath, settings)
+  return [`Copied ${SCRIPTS.join(', ')} to ${dir}.`, `${settingsPath}: statusLine runs ${dir}/statusline-command.sh.`, 'The status line appears with the next status update.'].join('\n')
+}
+
 export const register: Register = (on, options) => {
   const images = options.images === true
   const theme = options.imageTheme === 'default' ? 'default' : 'dark'
@@ -331,11 +432,13 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Mermaid diagrams drawn in replies; open one in the browser',
-      argumentHint: 'open [n] | list | on | off',
+      description: 'Mermaid diagrams drawn in replies, and the status line under the prompt',
+      argumentHint: 'open [n] | list | on | off | status [action]',
     })
     if (images && (await showsPictures($))) browser = await findBrowser($, browserPath)
-    return next(e)
+    const result = await next(e)
+    if (e.isInteractive) await refreshStatusScripts($)
+    return result
   })
 
   on('turn.start', async ($, e, next) => {
@@ -424,6 +527,7 @@ export const register: Register = (on, options) => {
     const command = parseCommand(e.args)
     if (command.kind === 'help') return { text: HELP }
     if (command.kind === 'invalid') return { text: `${command.reason}\n${HELP}` }
+    if (command.kind === 'status') return { text: await runStatus($, command.words) }
     if (command.kind === 'on' || command.kind === 'off') {
       await update($, enabled, () => command.kind === 'on')
       return { text: `Rich terminal is ${command.kind}.` }

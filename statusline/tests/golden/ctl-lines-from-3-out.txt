@@ -1,0 +1,1 @@
+status line → look=plain · lines=auto · visible

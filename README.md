@@ -1,6 +1,6 @@
 # Claude Rich Terminal
 
-Mermaid diagrams drawn inside Claude Code replies, instead of raw source.
+Mermaid diagrams drawn inside Claude Code replies, instead of raw source, and a truecolor status line under the prompt with a Token Weather forecast of the context window.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/demo-dark.gif">
@@ -15,6 +15,7 @@ The diagram in the animation is the plugin's own output: its text drawing, then 
 - **Fits the terminal.** A left-to-right flowchart too wide for the window is redrawn top-to-bottom. If it still does not fit, the source is shown. Changing the terminal's width redraws.
 - **Optional pictures.** In Ghostty or kitty, diagrams can be drawn as real images instead (see [Settings](#settings)).
 - **Full view in the browser.** `/rich open` opens a diagram as a zoomable page that works offline.
+- **A status line under the prompt.** Folder and git state, model and effort, context with Token Weather, time and cost, account and rate limits, restyled live with `/rich status` (see [Status line](#status-line)).
 
 Terminal drawings cover flowcharts, sequence, state, class, ER and xy charts. Other types (pie, gantt, mindmap, timeline, gitGraph, journey) stay as source, unless pictures are on.
 
@@ -411,6 +412,113 @@ journey
 
 <!-- gallery:end -->
 
+## Status line
+
+A status line under the prompt, here in the three-row layout (`/rich status lines`; colors omitted):
+
+```
+~/myproject/src > main ↑1 +12 -3 ?2
+Fable · xhigh > ☁ ctx 42% ▁▂▃▅█ > 12m · $1.23
+xiaolai > 5h 12% · 7d 67%
+```
+
+Run `/rich status setup` once. A plugin cannot draw under the prompt itself, only Claude Code's `statusLine` setting can, and that setting needs a stable path, while the plugin's own folder moves on every update. So setup copies three scripts from the plugin into Claude Code's config folder (`~/.claude/`, or `$CLAUDE_CONFIG_DIR`) and points `statusLine` at them, keeping every other setting. After a plugin update, the next session brings the copies up to date, but only copies this plugin installed and nobody has edited since; an edited copy is left alone and `/rich status check` reports it.
+
+### Segments
+
+Segments are grouped A / B / C for the multi-line layouts. Each appears only when it has data.
+
+| Group | Segment | Content |
+| --- | --- | --- |
+| A | Folder | Project-relative path (`project/sub/dir`) inside the session's project, otherwise the `~`-abbreviated absolute path |
+| A | Branch | Green when the working tree is clean, amber when anything is modified or untracked; `↑n ↓m` against the upstream |
+| A | Changes | `+insertions −deletions` against `HEAD`, plus `?n` untracked files |
+| B | Model | Model short name (`Fable`, `Opus`, …) and the live reasoning effort |
+| B | Context | `ctx 42%`, or an 8-cell `█████░░░` gauge with `bar`, with [Token Weather](#token-weather) around it |
+| B | Time · cost | Session duration (`45s`, `12m`, `1h5m`) and total API cost |
+| C | Account | The signed-in account from `~/.claude.json`, cached for 180 s: the email's local part, or the whole address |
+| C | Limits | 5-hour and 7-day rate-limit use; reset countdowns like `(3h)` or `(2d5h)` with `reset` |
+
+The context and limit gauges share one color scale: green below 60 %, amber from 60 %, red from 85 %.
+
+### Token Weather
+
+The context gauge is led by a forecast icon and followed by a sparkline of the session's last 12 readings, scaled to the fullest: `☁ ctx 42% ▁▂▃▅█`.
+
+| Context fill | Icon | Nerd Font glyph (`icons`) | Forecast |
+| --- | --- | --- | --- |
+| below 25 % | ☀ | U+E30D `weather-day_sunny` | Clear |
+| 25–49 % | ☁ | U+E312 `weather-cloudy` | Cloudy |
+| 50–74 % | ☂ | U+E319 `weather-showers` | Showers |
+| 75–89 % | ☇ | U+E31D `weather-thunderstorm` | Storm |
+| 90 % and up | ↯ | U+E351 `weather-tornado` | Compact soon |
+
+A reading is recorded whenever the fill changes, so a turn with several tool calls can add several; the sparkline appears from the second. Readings are kept per session in `~/.claude/.statusline-weather/`, and a new session sweeps files older than a week.
+
+The standard symbols are missing from most coding fonts, so the terminal borrows them from a fallback font and they can look out of place. With a Nerd Font, `/rich status icons` switches to its weather glyphs, one cell wide in a Mono variant. The sparkline bars are block elements, which Ghostty, kitty and most modern terminals draw to fill the cell exactly.
+
+### Status line settings
+
+`/rich status <action>` changes one setting; it shows on the next status update. The settings live in `~/.claude/statusline.state` as `KEY=VALUE` lines, which you can also edit by hand.
+
+| Action | Key | Default | Effect |
+| --- | --- | --- | --- |
+| `theme` | `THEME`, `STYLE` | plain | Cycle the look: plain → gray → aurora → sunset → forest; the four gradients draw powerline segments |
+| `style` | `STYLE` | `plain` | Toggle powerline ↔ plain, keeping the theme |
+| `lines` | `LINES` | `1` | Cycle `auto` → `1` → `2` → `3` rows; `auto` measures the terminal |
+| `toggle` / `hide` / `show` | `HIDDEN` | `0` | Hide the status line (it prints one blank line), or show it |
+| `bar` | `SHOW_BAR` | `0` | Context as a `████░░` gauge instead of `ctx N%` |
+| `account` | `SHOW_ACCOUNT` | `1` | Show or hide the account; `ACCOUNT_LOCAL=0` in the file shows the whole email |
+| `reset` | `SHOW_RESET` | `0` | Reset countdowns after the 5h/7d figures |
+| `weather` | `SHOW_WEATHER` | `1` | Token Weather on the context gauge |
+| `icons` | `ICONS` | `unicode` | Weather icons: standard symbols, or Nerd Font glyphs (`nerd`) |
+
+Powerline gradients run across each row's segments: gray `#4a4a4a` → `#1e1e1e`, aurora `#1e2a4a` → `#52304f`, sunset `#241f42` → `#5e3040`, forest `#163a34` → `#2c3a55`. The foreground colors carry meaning in both styles: green clean/ahead/low, amber dirty/behind/mid, red deletions/high, blue path, purple model, gold cost.
+
+### How the status line works
+
+```mermaid
+flowchart LR
+    CC["Claude Code"] -->|"status JSON on stdin"| R["statusline-command.sh"]
+    R -->|"ANSI rows"| SL["status line"]
+    CMD["/rich status action"] --> CTL["statusline-ctl.sh"]
+    CTL -->|"rewrites"| ST["~/.claude/statusline.state"]
+    ST -.->|"read on every render"| R
+    G["git, time-bounded"] -.->|"branch and diff"| R
+    R -.->|"reads and appends readings"| WX["~/.claude/.statusline-weather/"]
+```
+
+Claude Code runs the `statusLine` command on every status update and pipes it a JSON payload, which the renderer parses with `jq`. `/rich status` runs the controller from the plugin itself; it rewrites the state file through a temp file and an atomic rename. `LINES=auto` reads the terminal's width from `/dev/tty`, since the payload carries none, and falls back to three rows where that fails.
+
+Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, default 3 s): Claude Code blanks a status line that takes 5 s, so a slow repository loses only its git segments. Git runs nothing a repository's config names: every call passes `-c core.fsmonitor=false`, and the diff passes `--no-ext-diff --no-textconv`. Set either budget in the command, e.g. `GIT_BUDGET=1 bash ~/.claude/statusline-command.sh`.
+
+### Requirements
+
+| Requirement | Needed for | Without it |
+| --- | --- | --- |
+| `jq` | parsing the status JSON: the whole line | nearly empty; macOS ships `/usr/bin/jq`, else `brew install jq` |
+| bash, standard Unix tools | running the scripts | stock macOS bash 3.2 works |
+| A truecolor terminal (Ghostty, iTerm2, kitty, WezTerm) | the colors | colors degrade in Terminal.app; layout still works |
+| The U+E0B0 glyph (a Nerd Font; Ghostty bundles the symbols) | the powerline looks' arrows | missing-glyph boxes; `plain` needs none |
+| Nerd Font weather glyphs | `icons` set to `nerd` | missing-glyph boxes; keep `unicode` |
+| `git` | the branch and changes | those segments hide |
+| `timeout` or `perl` | bounding one slow git call | git is bounded only between calls |
+
+### Status line troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Nothing under the prompt | `/rich status check` shows whether `statusLine` runs the copied scripts; `/rich status setup` wires it |
+| Nearly empty line | `jq` is missing |
+| Boxes instead of arrows | a powerline look without the U+E0B0 glyph: use a Nerd Font, or `/rich status style` for plain |
+| Weather icon looks out of place | the font lacks the symbol: with a Nerd Font, `/rich status icons` |
+| No sparkline yet | it needs two readings with different fills |
+| Toggle seems to do nothing | the line redraws on the next status update: send a message or wait |
+| `lines auto` always gives 3 rows | `/dev/tty` is not readable here: choose `1`, `2` or `3` |
+| `check` says customized | you or another tool edited that copy, so updates leave it alone; `/rich status setup` replaces it |
+
+To remove it: delete the `statusLine` key from `settings.json`, then the copied `statusline-*.sh`, `statusline.state`, `.statusline-account` and `.statusline-weather/` in `~/.claude/`.
+
 ## Commands
 
 | Command | Effect |
@@ -418,6 +526,10 @@ journey
 | `/rich list` | Number the diagrams in this conversation, with their ids |
 | `/rich open [n\|id]` | Open diagram *n* (or by id) in the default browser; the latest without one. Uses `open` on macOS and `xdg-open` on Linux |
 | `/rich on` / `/rich off` | Draw diagrams, or leave replies as Claude Code draws them |
+| `/rich status` | Show the status line settings |
+| `/rich status setup` | Copy the status line scripts and point the `statusLine` setting at them |
+| `/rich status check` | Compare the copied scripts with this plugin: current, outdated, customized or missing |
+| `/rich status <action>` | Change one status line setting; see [Status line settings](#status-line-settings) |
 
 ## Settings
 
@@ -464,9 +576,10 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin test .                       # hooks and core logic, in Claude Code's test kit
 node scripts/check-pages.mjs               # browser pages in headless Chrome: drawn, no links, no network
 npx tsc -p . && npx tsc -p tsconfig.viewer.json
+bash statusline/tests/run.sh               # status line scripts: golden output and security contracts
 ```
 
-`hooks/core.ts` holds the logic that does not touch Claude Code; `hooks/register.tsx` holds the hooks. The renderers are vendored; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+`hooks/core.ts` (diagrams) and `hooks/statusline.ts` (the status line's setup) hold the logic that does not touch Claude Code; `hooks/register.tsx` holds the hooks. The status line itself is the bash in `statusline/scripts/`; its tests pin the renderer's exact output (`bash statusline/tests/run.sh record` re-records it) and run under the stock macOS bash 3.2. The renderers are vendored; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
