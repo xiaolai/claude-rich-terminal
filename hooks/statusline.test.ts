@@ -52,7 +52,14 @@ test('a copy is replaced only while it is still what the plugin installed', () =
 
 test('the check names each script and whether the setting runs them', () => {
   const text = describeCheck({ 'statusline-command.sh': 'current', 'statusline-ctl.sh': 'customized', 'statusline-lib.sh': 'missing' }, false, '/d')
-  expect(text).toContain('statusline-ctl.sh      customized')
-  expect(text).toContain('does not run these scripts')
-  expect(text).toContain('never replaced')
+  expect(text.split('\n')).toEqual([
+    'Status line scripts copied into /d:',
+    '  statusline-command.sh  up to date',
+    '  statusline-ctl.sh      edited since it was copied; left alone (/rich status setup replaces it)',
+    '  statusline-lib.sh      missing (/rich status setup copies it)',
+    "Claude Code's statusLine setting runs something else; /rich status setup points it at these copies.",
+  ])
+  expect(describeCheck({ 'statusline-command.sh': 'outdated', 'statusline-ctl.sh': 'current', 'statusline-lib.sh': 'current' }, true, '/d')).toContain(
+    "  statusline-command.sh  older than this plugin; replaced at the next session start\n  statusline-ctl.sh      up to date\n  statusline-lib.sh      up to date\nClaude Code's statusLine setting runs these copies.",
+  )
 })

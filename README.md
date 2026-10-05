@@ -511,7 +511,7 @@ Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, d
 | Weather icon looks out of place | the font lacks the symbol: with a Nerd Font, `/rich status icons` |
 | Toggle seems to do nothing | the line redraws on the next status update: send a message or wait |
 | `lines auto` always gives 3 rows | `/dev/tty` is not readable here: choose `1`, `2` or `3` |
-| `check` says customized | you or another tool edited that copy, so updates leave it alone; `/rich status setup` replaces it |
+| `check` says a copy was edited | you or another tool changed it, so updates leave it alone; `/rich status setup` replaces it |
 
 To remove it: delete the `statusLine` key from `settings.json`, then the copied `statusline-*.sh`, `statusline.state` and `.statusline-account` in `~/.claude/` (and `.statusline-weather/`, if an earlier version left one).
 
@@ -524,7 +524,7 @@ To remove it: delete the `statusLine` key from `settings.json`, then the copied 
 | `/rich on` / `/rich off` | Draw diagrams, or leave replies as Claude Code draws them |
 | `/rich status` | Show the status line settings |
 | `/rich status setup` | Copy the status line scripts and point the `statusLine` setting at them |
-| `/rich status check` | Compare the copied scripts with this plugin: current, outdated, customized or missing |
+| `/rich status check` | Say whether each copied script is up to date, older, edited or missing, and whether the `statusLine` setting runs the copies |
 | `/rich status <action>` | Change one status line setting; see [Status line settings](#status-line-settings) |
 
 ## Settings

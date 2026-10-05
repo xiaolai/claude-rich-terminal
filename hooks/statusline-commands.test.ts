@@ -91,7 +91,7 @@ test('a session start replaces outdated and missing copies, and never a customiz
   expect(d.files.get(`${CONFIG}/statusline-command.sh`)).toBe('new statusline-command.sh')
   expect(d.files.get(`${CONFIG}/statusline-ctl.sh`)).toBe('old, then edited')
   expect(d.files.get(`${CONFIG}/statusline-lib.sh`)).toBe('new statusline-lib.sh')
-  expect((await rich($, 'status check')).text).toContain('statusline-ctl.sh      customized')
+  expect((await rich($, 'status check')).text).toContain('statusline-ctl.sh      edited since it was copied')
 })
 
 test('a current copy is adopted, so the next update can replace it', { timeoutMs: 60_000 }, async ($, on) => {

@@ -76,9 +76,18 @@ export function scriptState(bundled: string, copy: string | undefined, installed
   return copy === installed ? 'outdated' : 'customized'
 }
 
+const STATE_TEXT: Record<ScriptState, string> = {
+  current: 'up to date',
+  outdated: 'older than this plugin; replaced at the next session start',
+  customized: 'edited since it was copied; left alone (/rich status setup replaces it)',
+  missing: 'missing (/rich status setup copies it)',
+}
+
+/** Two answers: are the copies this plugin's current scripts, and does Claude Code's statusLine setting run them. */
 export function describeCheck(states: Readonly<Record<ScriptName, ScriptState>>, wired: boolean, dir: string): string {
-  const lines = SCRIPTS.map(name => `${name.padEnd(22)} ${states[name]}`)
-  lines.push(wired ? `statusLine setting runs ${dir}/statusline-command.sh` : 'statusLine setting does not run these scripts: /rich status setup wires it')
-  if (SCRIPTS.some(name => states[name] === 'customized')) lines.push('A customized copy is yours and is never replaced; /rich status setup replaces it.')
-  return lines.join('\n')
+  return [
+    `Status line scripts copied into ${dir}:`,
+    ...SCRIPTS.map(name => `  ${name.padEnd(22)} ${STATE_TEXT[states[name]]}`),
+    wired ? "Claude Code's statusLine setting runs these copies." : "Claude Code's statusLine setting runs something else; /rich status setup points it at these copies.",
+  ].join('\n')
 }
