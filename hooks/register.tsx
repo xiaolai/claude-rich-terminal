@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { FsStat } from 'claude-code'
-import type { EngineInterface, Register, RenderNode } from 'claude-code'
+import type { EngineInterface, Register, RenderNode, Timer } from 'claude-code'
+
+import type { StatusData, StatusGit, StatusSettings, StatusTurnModel, TokenReading } from '../types'
 
 import {
   cells,
@@ -23,6 +25,25 @@ import {
   viewerHtml,
 } from './core.ts'
 import type { Diagram, PageScripts } from './core.ts'
+import {
+  accountFrom,
+  bandGroups,
+  COLOR,
+  clean,
+  DEFAULT_SETTINGS,
+  describeSettings,
+  HISTORY,
+  layout,
+  limitLabel,
+  parseGitStatus,
+  parseNumstat,
+  segmentBackground,
+  settingsFrom,
+  shortModel,
+  STATUS_HELP,
+  statusCommand,
+} from './status.ts'
+import type { Segment } from './status.ts'
 import { renderMermaidAscii } from './vendor/mermaid-ascii.js'
 
 const COMMAND = 'rich'
@@ -38,6 +59,8 @@ const HELP = [
   '/rich on | off       draw diagrams in replies, or leave them as source',
   'With no number, the latest diagram is used.',
   'Diagram images (Ghostty, kitty): turn on "images" for this plugin in /config.',
+  '',
+  STATUS_HELP,
 ].join('\n')
 
 const CHROME_PATHS = [
@@ -322,6 +345,158 @@ async function openInBrowser($: EngineInterface, path: string): Promise<string |
   }
 }
 
+// ── The status band above the prompt ──────────────────────────────────
+
+const settings = atom({ plugin: 'rich-terminal', key: 'statusSettings' } as const, DEFAULT_SETTINGS)
+const figures = atom({ plugin: 'rich-terminal', key: 'status' } as const, null as StatusData | null)
+const readings = atom({ plugin: 'rich-terminal', key: 'readings' } as const, [] as TokenReading[])
+const turnModel = atom({ plugin: 'rich-terminal', key: 'turnModel' } as const, null as StatusTurnModel | null)
+const STORE_KEY = 'statusSettings'
+
+const REFRESH_MS = 5000
+/** Git gets 3 s in all and 2 s a call: a slow repository loses its segment, never the band. */
+const GIT_TOTAL_MS = 3000
+const GIT_CALL_MS = 2000
+const ACCOUNT_TTL_MS = 180_000
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+// Module memory: lost on a reload, and rebuilt by the next refresh.
+let refreshing = false
+let again = false
+let account: { label: string | undefined; at: number } | undefined
+/** Set once the band has started: its absence means no session here draws it, so nothing is read. */
+let timer: Timer | undefined
+
+/** Branch, ahead/behind and working-tree changes, within the git budget; undefined outside a repository. */
+async function gitState($: EngineInterface, cwd: string): Promise<StatusGit | undefined> {
+  const deadline = (await $.clock.now()) + GIT_TOTAL_MS
+  const git = async (args: string[]): Promise<{ stdout: string; isWhole: boolean } | undefined> => {
+    const left = deadline - (await $.clock.now())
+    if (left <= 0) return undefined
+    try {
+      // No fsmonitor command from the repository's config: a status read must run nothing but git.
+      const ran = await $.process.run(['git', '--no-optional-locks', '-c', 'core.fsmonitor=false', ...args], { cwd, timeoutMs: Math.min(GIT_CALL_MS, left) })
+      return ran.exitCode === 0 ? { stdout: ran.stdout, isWhole: !ran.isStdoutTruncated } : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const status = await git(['status', '--porcelain=v2', '--branch', '--untracked-files=all'])
+  const parsed = status === undefined ? undefined : parseGitStatus(status.stdout)
+  if (status === undefined || parsed === undefined) return undefined
+  const { branch, ahead, behind } = parsed
+  // A cut-off listing undercounts the untracked files: the tree is then unmeasured, not clean.
+  const diff = status.isWhole ? await git(['diff', '--no-ext-diff', '--no-textconv', '--numstat', parsed.isInitial ? EMPTY_TREE : 'HEAD']) : undefined
+  if (diff === undefined || !diff.isWhole) return { branch, ahead, behind }
+  return { branch, ahead, behind, changes: { ...parseNumstat(diff.stdout), untracked: parsed.untracked } }
+}
+
+/** The signed-in account, read from Claude Code's own config and kept for three minutes. */
+async function accountLabel($: EngineInterface, home: string | undefined, now: number): Promise<string | undefined> {
+  if (account !== undefined && now - account.at < ACCOUNT_TTL_MS) return account.label
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? home
+  let label: string | undefined
+  try {
+    if (dir !== undefined) label = accountFrom(await $.fs.read(`${dir}/.claude.json`))
+  } catch {
+    // no config file, or not readable: no account segment
+  }
+  account = { label, at: now }
+  return label
+}
+
+async function collect($: EngineInterface, s: StatusSettings): Promise<StatusData> {
+  const [usage, cwd, root, home, turn] = await Promise.all([$.session.usage(), $.session.cwd(), $.session.root(), $.env.get('HOME'), read($, turnModel)])
+  const now = await $.clock.now()
+  const model = turn?.model ?? (await $.session.model().then(shortModel, () => undefined))
+  const [git, label] = await Promise.all([gitState($, cwd), s.account === 'off' ? undefined : accountLabel($, home, now)])
+  const { tokens, window, percent } = usage.context
+  return {
+    cwd,
+    root,
+    ...(home !== undefined && { home }),
+    ...(git !== undefined && { git }),
+    ...(model !== undefined && { model }),
+    ...(turn?.effort !== undefined && { effort: turn.effort }),
+    elapsedMs: Math.max(0, now - usage.startedAt),
+    ...(tokens !== undefined && window > 0 && { context: { tokens, window, percent: percent ?? Math.round((tokens / window) * 100) } }),
+    ...(usage.cost !== undefined && { costUsd: usage.cost.usd }),
+    limits: usage.rateLimits.map(limit => {
+      const resetsAt = limit.resetsAt === undefined ? NaN : Date.parse(limit.resetsAt)
+      return { label: limitLabel(limit.kind), percent: limit.percentUsed, ...(Number.isFinite(resetsAt) && { resetsAt }) }
+    }),
+    ...(label !== undefined && { account: label }),
+    now,
+  }
+}
+
+/** Reads the figures again, one reading at a time: a call made meanwhile runs once more after it. */
+async function refresh($: EngineInterface): Promise<void> {
+  if (refreshing) {
+    again = true
+    return
+  }
+  refreshing = true
+  try {
+    do {
+      again = false
+      const s = await read($, settings)
+      if (!s.visible) return
+      const data = await collect($, s)
+      await update($, figures, old => (JSON.stringify(old) === JSON.stringify(data) ? old : data))
+    } while (again)
+  } catch (error) {
+    $.ui.log(`rich-terminal: status band not refreshed: ${String(error)}`, { to: 'debug' })
+  } finally {
+    refreshing = false
+  }
+}
+
+/** Token Weather's reading of the context window, once the session has one. */
+async function takeReading($: EngineInterface): Promise<void> {
+  try {
+    const { tokens, window, percent } = (await $.session.usage()).context
+    if (tokens === undefined || window <= 0) return
+    const reading = { tokens, window, percent: percent ?? Math.round((tokens / window) * 100) }
+    await update($, readings, history => [...history, reading].slice(-HISTORY))
+  } catch (error) {
+    $.ui.log(`rich-terminal: no context reading: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/** Answers `/rich status …`: shows, or changes and keeps, the band's settings. */
+async function runStatusCommand($: EngineInterface, words: readonly string[]): Promise<string> {
+  const current = await read($, settings)
+  const command = statusCommand(words, current)
+  if (command.kind === 'invalid') return `${command.reason}\n${STATUS_HELP}`
+  if (command.kind === 'show') return describeSettings(current)
+  await update($, settings, () => command.settings)
+  await $.store.set(STORE_KEY, command.settings)
+  if (command.settings.visible) void refresh($)
+  return describeSettings(command.settings)
+}
+
+/** Loads the kept settings, takes the first reading and starts the refresh timer; after the session has started. */
+async function startStatusBand($: EngineInterface): Promise<void> {
+  let stored: unknown
+  try {
+    stored = await $.store.get(STORE_KEY)
+  } catch (error) {
+    $.ui.log(`rich-terminal: status settings unreadable, defaults used: ${String(error)}`, { to: 'debug' })
+  }
+  await update($, settings, () => settingsFrom(stored))
+  await takeReading($)
+  void refresh($)
+  timer?.cancel()
+  timer = $.clock.every(REFRESH_MS, () => void refresh($))
+}
+
+/** A main-loop turn ended: Token Weather takes its reading and the figures are read again. */
+async function statusTurnEnded($: EngineInterface): Promise<void> {
+  await takeReading($)
+  void refresh($)
+}
+
 export const register: Register = (on, options) => {
   const images = options.images === true
   const theme = options.imageTheme === 'default' ? 'default' : 'dark'
@@ -331,11 +506,14 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Mermaid diagrams drawn in replies; open one in the browser',
-      argumentHint: 'open [n] | list | on | off',
+      description: 'Mermaid diagrams drawn in replies, and the status band above the prompt',
+      argumentHint: 'open [n] | list | on | off | status [setting]',
     })
     if (images && (await showsPictures($))) browser = await findBrowser($, browserPath)
-    return next(e)
+    const result = await next(e)
+    // The band is drawn only in an interactive terminal: elsewhere nothing would show the figures read.
+    if (e.isInteractive && e.surface === 'terminal') await startStatusBand($)
+    return result
   })
 
   on('turn.start', async ($, e, next) => {
@@ -348,6 +526,7 @@ export const register: Register = (on, options) => {
       return await next(e)
     } finally {
       await update($, running, ids => ids.filter(id => id !== e.turnId))
+      if (e.agentId === undefined && timer !== undefined) await statusTurnEnded($)
     }
   })
 
@@ -424,6 +603,7 @@ export const register: Register = (on, options) => {
     const command = parseCommand(e.args)
     if (command.kind === 'help') return { text: HELP }
     if (command.kind === 'invalid') return { text: `${command.reason}\n${HELP}` }
+    if (command.kind === 'status') return { text: await runStatusCommand($, command.words) }
     if (command.kind === 'on' || command.kind === 'off') {
       await update($, enabled, () => command.kind === 'on')
       return { text: `Rich terminal is ${command.kind}.` }
@@ -438,5 +618,56 @@ export const register: Register = (on, options) => {
     if (page === undefined) return { text: `Could not write the browser page: no private cache folder (${cacheError?.reason ?? 'unknown reason'}). It is retried in 30 s.` }
     const failed = await openInBrowser($, page)
     return { text: failed === undefined ? `Opened ${diagram.kind} ${diagram.id} in the browser.` : `Could not open the browser: ${failed}` }
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      const effort = e.effort === undefined ? undefined : clean(String(e.effort))
+      await update($, turnModel, () => ({ model: shortModel(e.model), ...(effort && { effort }) }))
+    }
+    const result = yield* next(e)
+    if (e.agentId === undefined && timer !== undefined) void refresh($)
+    return result
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
+    const s = await read($, settings)
+    const data = await read($, figures)
+    if (!s.visible || data === null) return next(e)
+    const columns = e.props.bodyColumns
+    const rows = layout(bandGroups(data, await read($, readings), s, columns), s, columns)
+    if (rows.length === 0) return next(e)
+
+    const { Box, Text } = $.ui.resolve(e)
+    const runs = (seg: Segment, bg?: string): RenderNode[] =>
+      seg.runs.map(r => (
+        <Text color={r.color ?? COLOR.fg} {...(bg !== undefined && { backgroundColor: bg })} {...(r.bold === true && { bold: true })}>
+          {r.text}
+        </Text>
+      ))
+    const row = (segs: Segment[]): RenderNode[] => {
+      const look = s.look
+      if (look === 'plain') return segs.flatMap((seg, i) => [...(i > 0 ? [<Text color={COLOR.separator}>{' > '}</Text>] : []), ...runs(seg)])
+      return segs.flatMap((seg, i) => {
+        const bg = segmentBackground(look, i, segs.length)
+        const after = i + 1 < segs.length ? segmentBackground(look, i + 1, segs.length) : undefined
+        return [
+          <Text backgroundColor={bg}> </Text>,
+          ...runs(seg, bg),
+          <Text backgroundColor={bg}> </Text>,
+          <Text color={bg} {...(after !== undefined && { backgroundColor: after })}>
+            {'\ue0b0'}
+          </Text>,
+        ]
+      })
+    }
+    return (
+      <Box flexDirection="column">
+        {rows.map(segs => (
+          <Text wrap="truncate-end">{row(segs)}</Text>
+        ))}
+      </Box>
+    )
   })
 }
