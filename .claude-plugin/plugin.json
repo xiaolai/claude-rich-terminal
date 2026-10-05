@@ -1,6 +1,6 @@
 {
   "name": "rich-terminal",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Mermaid diagrams drawn inside Claude Code replies, and a truecolor status line under the prompt with a Token Weather forecast of the context window.",
   "author": {
     "name": "xiaolai"
