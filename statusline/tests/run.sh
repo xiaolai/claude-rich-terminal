@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Characterization + contract tests for the statusline scripts.
+# Characterization + contract tests for the status line scripts.
 #
 #   bash tests/run.sh record   # capture current behavior as the golden baseline
 #   bash tests/run.sh check    # assert current behavior still matches the baseline
@@ -13,8 +13,8 @@ set -u
 
 HERE="${BASH_SOURCE[0]%/*}"; [ "$HERE" = "${BASH_SOURCE[0]}" ] && HERE=.
 SCRIPTS="$HERE/../scripts"
-CMD="$SCRIPTS/statusline-command.sh"
-CTL="$SCRIPTS/statusline-ctl.sh"
+CMD="$SCRIPTS/rich-status.sh"
+CTL="$SCRIPTS/rich-status-ctl.sh"
 GOLDEN="$HERE/golden"
 MODE="${1:-check}"
 mkdir -p "$GOLDEN"
@@ -31,7 +31,7 @@ DEF_STATE=$'THEME=gray\nSTYLE=plain\nLINES=1\nHIDDEN=0\nSHOW_BAR=0\nACCOUNT_LOCA
 render() {
   local state="$1" json="$2" cj="${3-}" h out
   h=$(mktemp -d); mkdir -p "$h/.claude"
-  [ -n "$state" ] && printf '%s' "$state" > "$h/.claude/statusline.state"
+  [ -n "$state" ] && printf '%s' "$state" > "$h/.claude/rich-status.state"
   [ -n "$cj" ] && printf '%s' "$cj" > "$h/.claude.json"
   json=${json//@HOME@/$h}
   out=$(printf '%s' "$json" | HOME="$h" bash "$CMD" 2>/dev/null)
@@ -163,7 +163,7 @@ case "$bo" in *ctx*) bad "badnum-ctx" "ctx shown for non-number" ;; *) ok ;; esa
 case "$bo" in *'$'*) bad "badnum-cost" "cost shown for non-number" ;; *) ok ;; esac
 
 # Hidden state emits exactly one blank line.
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf 'HIDDEN=1\n' > "$h/.claude/statusline.state"
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf 'HIDDEN=1\n' > "$h/.claude/rich-status.state"
 n=$(printf '%s' "$MINIMAL" | HOME="$h" bash "$CMD" 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" = "1" ] && ok || bad "hidden" "expected 1 line, got $n"
 firstline=$(printf '%s' "$MINIMAL" | HOME="$h" bash "$CMD" 2>/dev/null)
@@ -186,9 +186,9 @@ if [ "$au" = "$v1" ] || [ "$au" = "$v2" ] || [ "$au" = "$v3" ]; then ok; else ba
 ctl() {
   local id="$1" state="$2" action="$3" h so st
   h=$(mktemp -d); mkdir -p "$h/.claude"
-  [ -n "$state" ] && printf '%s' "$state" > "$h/.claude/statusline.state"
+  [ -n "$state" ] && printf '%s' "$state" > "$h/.claude/rich-status.state"
   so=$(HOME="$h" bash "$CTL" "$action" 2>&1)
-  st=$(cat "$h/.claude/statusline.state" 2>/dev/null)
+  st=$(cat "$h/.claude/rich-status.state" 2>/dev/null)
   rm -rf "$h"
   golden "ctl-$id-state" "$st"
   golden "ctl-$id-out" "$so"
@@ -207,27 +207,27 @@ ctl account           "$DEF_STATE" account
 ctl reset             "$DEF_STATE" reset
 
 # Controller contract: bogus action exits 2, writes usage to stderr, leaves state untouched.
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/rich-status.state"
 so_out=$(HOME="$h" bash "$CTL" bogus 2>/dev/null)   # stdout only
 so_err=$(HOME="$h" bash "$CTL" bogus 2>&1 >/dev/null) # stderr only
 HOME="$h" bash "$CTL" bogus >/dev/null 2>&1; rc=$?
 [ "$rc" = 2 ] && ok || bad "ctl-bogus-rc" "exit $rc"
 [ -z "$so_out" ] && ok || bad "ctl-bogus-stdout" "usage went to stdout"
 case "$so_err" in *usage*) ok ;; *) bad "ctl-bogus-stderr" "no usage on stderr" ;; esac
-[ "$(cat "$h/.claude/statusline.state")" = "$(printf '%s' "$DEF_STATE")" ] && ok || bad "ctl-bogus-state" "state changed"
-ls "$h/.claude/"statusline.state.?????? >/dev/null 2>&1 && bad "ctl-orphan" "orphan temp left" || ok
+[ "$(cat "$h/.claude/rich-status.state")" = "$(printf '%s' "$DEF_STATE")" ] && ok || bad "ctl-bogus-state" "state changed"
+ls "$h/.claude/"rich-status.state.?????? >/dev/null 2>&1 && bad "ctl-orphan" "orphan temp left" || ok
 rm -rf "$h"
 
 # Controller contract: no trailing newline in the initial state is still parsed.
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf 'THEME=gray\nSTYLE=powerline\nLINES=2' > "$h/.claude/statusline.state"
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf 'THEME=gray\nSTYLE=powerline\nLINES=2' > "$h/.claude/rich-status.state"
 HOME="$h" bash "$CTL" bar >/dev/null 2>&1
-grep -q 'LINES=2' "$h/.claude/statusline.state" && ok || bad "ctl-no-nl" "last line dropped"
+grep -q 'LINES=2' "$h/.claude/rich-status.state" && ok || bad "ctl-no-nl" "last line dropped"
 rm -rf "$h"
 
 # Contract: a repository's config cannot make the renderer run a command
 # (core.fsmonitor on index refresh, a textconv driver on diff).
 r=$(mktemp -d); h=$(mktemp -d); mkdir -p "$h/.claude"
-printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
+printf '%s' "$DEF_STATE" > "$h/.claude/rich-status.state"
 git -C "$r" init -q && printf 'a\n' > "$r/f.txt" && git -C "$r" add f.txt \
   && git -C "$r" -c user.name=t -c user.email=t@example.com commit -qm init
 printf 'b\n' >> "$r/f.txt"
@@ -242,7 +242,7 @@ rm -rf "$r" "$h"
 
 # Contract: Token Weather.
 WX_STATE=${DEF_STATE/SHOW_WEATHER=0/SHOW_WEATHER=1}
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$WX_STATE" > "$h/.claude/statusline.state"
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$WX_STATE" > "$h/.claude/rich-status.state"
 wx() { printf '{"session_id":"%s","context_window":{"used_percentage":%s}}' "$1" "$2" | HOME="$h" bash "$CMD" 2>/dev/null | strip_ansi; }
 for pc in "10 ☀" "30 ☁" "60 ☂" "80 ☇" "95 ↯"; do
   o=$(wx "icons-${pc% *}" "${pc% *}")
@@ -250,9 +250,9 @@ for pc in "10 ☀" "30 ☁" "60 ☂" "80 ☇" "95 ↯"; do
 done
 # The icon alone: nothing after the figure, and nothing written to disk.
 o=$(wx s1 40); case "$o" in *"☁ ctx 40%") ok ;; *) bad "wx-icon-only" "$o" ;; esac
-[ "$(ls -A "$h/.claude")" = "statusline.state" ] && ok || bad "wx-no-files" "$(ls -A "$h/.claude" | tr '\n' ' ')"
+[ "$(ls -A "$h/.claude")" = "rich-status.state" ] && ok || bad "wx-no-files" "$(ls -A "$h/.claude" | tr '\n' ' ')"
 # ICONS=nerd: Nerd Font weather glyphs, as bytes, under the stock macOS bash 3.2 too.
-printf '%s' "${WX_STATE/ICONS=unicode/ICONS=nerd}" > "$h/.claude/statusline.state"
+printf '%s' "${WX_STATE/ICONS=unicode/ICONS=nerd}" > "$h/.claude/rich-status.state"
 for sh in bash /bin/bash; do
   for pc in "10 ee8c8d" "30 ee8c92" "60 ee8c99" "80 ee8c9d" "95 ee8d91"; do
     hex=$(printf '{"context_window":{"used_percentage":%s}}' "${pc% *}" | HOME="$h" "$sh" "$CMD" 2>/dev/null | od -An -tx1 | tr -d ' \n')
@@ -260,21 +260,21 @@ for sh in bash /bin/bash; do
   done
 done
 # Off: no icon.
-printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
+printf '%s' "$DEF_STATE" > "$h/.claude/rich-status.state"
 o=$(wx s1 40); [ "$o" = "~ > Claude > ctx 40%" ] && ok || bad "wx-off" "$o"
 rm -rf "$h"
 
 # Controller contract: status reports every setting and writes nothing.
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
-before=$(cat "$h/.claude/statusline.state")
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/rich-status.state"
+before=$(cat "$h/.claude/rich-status.state")
 so=$(HOME="$h" bash "$CTL" status 2>/dev/null); rc=$?
 [ "$rc" = 0 ] && ok || bad "ctl-status-rc" "exit $rc"
 [ "$so" = "status line → look=plain · lines=1 · visible · bar=off · account=name · reset=off · weather=off · icons=unicode" ] && ok || bad "ctl-status-out" "$so"
-[ "$(cat "$h/.claude/statusline.state")" = "$before" ] && ok || bad "ctl-status-write" "status changed the state file"
+[ "$(cat "$h/.claude/rich-status.state")" = "$before" ] && ok || bad "ctl-status-write" "status changed the state file"
 rm -rf "$h"
 
 # Contract: the git budgets come from the environment and must never run code.
-h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/statusline.state"
+h=$(mktemp -d); mkdir -p "$h/.claude"; printf '%s' "$DEF_STATE" > "$h/.claude/rich-status.state"
 for var in GIT_TOTAL GIT_BUDGET; do
   printf '{"workspace":{"current_dir":"%s"}}' "$HERE" | env HOME="$h" "$var=a[\$(>$h/pwned-$var)]" bash "$CMD" >/dev/null 2>&1
   [ ! -e "$h/pwned-$var" ] && ok || bad "env-inject-$var" "$var ran a command"

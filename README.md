@@ -422,7 +422,9 @@ Fable · xhigh > ☁ ctx 42% > 12m · $1.23
 xiaolai > 5h 12% · 7d 67%
 ```
 
-Run `/rich status setup` once. A plugin cannot draw under the prompt itself, only Claude Code's `statusLine` setting can, and that setting needs a stable path, while the plugin's own folder moves on every update. So setup copies three scripts from the plugin into Claude Code's config folder (`~/.claude/`, or `$CLAUDE_CONFIG_DIR`) and points `statusLine` at them, keeping every other setting. After a plugin update, the next session brings the copies up to date, but only copies this plugin installed and nobody has edited since; an edited copy is left alone and `/rich status check` reports it.
+Run `/rich status setup` once. A plugin cannot draw under the prompt itself, only Claude Code's `statusLine` setting can, and that setting needs a stable path, while the plugin's own folder moves on every update. So setup copies three scripts from the plugin (`rich-status.sh`, the renderer; `rich-status-ctl.sh`, which `/rich status` runs; and `rich-status-lib.sh`, their shared settings code) into Claude Code's config folder (`~/.claude/`, or `$CLAUDE_CONFIG_DIR`) and points `statusLine` at them, keeping every other setting. After a plugin update, the next session brings the copies up to date, but only copies this plugin installed and nobody has edited since; an edited copy is left alone and `/rich status check` reports it.
+
+Before 1.0.0 these files were named `statusline-command.sh`, `statusline-ctl.sh`, `statusline-lib.sh` and `statusline.state`. A session start moves such a setup to the new names, settings included, when the old copies are exactly what the plugin installed; otherwise `/rich status check` says so, and `/rich status setup` moves it, leaving an edited old copy in place.
 
 ### Segments
 
@@ -457,7 +459,7 @@ The standard symbols are missing from most coding fonts, so the terminal borrows
 
 ### Status line settings
 
-`/rich status <action>` changes one setting; it shows on the next status update. The settings live in `~/.claude/statusline.state` as `KEY=VALUE` lines, which you can also edit by hand.
+`/rich status <action>` changes one setting; it shows on the next status update. The settings live in `~/.claude/rich-status.state` as `KEY=VALUE` lines, which you can also edit by hand.
 
 | Action | Key | Default | Effect |
 | --- | --- | --- | --- |
@@ -477,17 +479,17 @@ Powerline gradients run across each row's segments: gray `#4a4a4a` → `#1e1e1e`
 
 ```mermaid
 flowchart LR
-    CC["Claude Code"] -->|"status JSON on stdin"| R["statusline-command.sh"]
+    CC["Claude Code"] -->|"status JSON on stdin"| R["rich-status.sh"]
     R -->|"ANSI rows"| SL["status line"]
-    CMD["/rich status action"] --> CTL["statusline-ctl.sh"]
-    CTL -->|"rewrites"| ST["~/.claude/statusline.state"]
+    CMD["/rich status action"] --> CTL["rich-status-ctl.sh"]
+    CTL -->|"rewrites"| ST["~/.claude/rich-status.state"]
     ST -.->|"read on every render"| R
     G["git, time-bounded"] -.->|"branch and diff"| R
 ```
 
 Claude Code runs the `statusLine` command on every status update and pipes it a JSON payload, which the renderer parses with `jq`. `/rich status` runs the controller from the plugin itself; it rewrites the state file through a temp file and an atomic rename. `LINES=auto` reads the terminal's width from `/dev/tty`, since the payload carries none, and falls back to three rows where that fails.
 
-Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, default 3 s): Claude Code blanks a status line that takes 5 s, so a slow repository loses only its git segments. Git runs nothing a repository's config names: every call passes `-c core.fsmonitor=false`, and the diff passes `--no-ext-diff --no-textconv`. Set either budget, 1 to 60 whole seconds, in the command, e.g. `GIT_BUDGET=1 bash ~/.claude/statusline-command.sh`; any other value is ignored.
+Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, default 3 s): Claude Code blanks a status line that takes 5 s, so a slow repository loses only its git segments. Git runs nothing a repository's config names: every call passes `-c core.fsmonitor=false`, and the diff passes `--no-ext-diff --no-textconv`. Set either budget, 1 to 60 whole seconds, in the command, e.g. `GIT_BUDGET=1 bash ~/.claude/rich-status.sh`; any other value is ignored.
 
 ### Requirements
 
@@ -513,7 +515,7 @@ Git is bounded per call (`GIT_BUDGET`, default 2 s) and in total (`GIT_TOTAL`, d
 | `lines auto` always gives 3 rows | `/dev/tty` is not readable here: choose `1`, `2` or `3` |
 | `check` says a copy was edited | you or another tool changed it, so updates leave it alone; `/rich status setup` replaces it |
 
-To remove it: delete the `statusLine` key from `settings.json`, then the copied `statusline-*.sh`, `statusline.state` and `.statusline-account` in `~/.claude/` (and `.statusline-weather/`, if an earlier version left one).
+To remove it: delete the `statusLine` key from `settings.json`, then the copied `rich-status*.sh`, `rich-status.state` and `.rich-status-account` in `~/.claude/`.
 
 ## Commands
 

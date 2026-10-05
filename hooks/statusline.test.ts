@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { describeCheck, runsOurRenderer, scriptState, statusCommand, statusLineCommand, withStatusLine } from './statusline.ts'
+import { describeCheck, legacyIsPristine, runsScript, scriptState, statusCommand, statusLineCommand, wiring, withStatusLine } from './statusline.ts'
 
 test('status actions parse strictly', () => {
   expect(statusCommand([])).toEqual({ kind: 'controller', action: 'status' })
@@ -18,7 +18,7 @@ test('setup sets statusLine and keeps every other key, its own extras included',
   const before = JSON.stringify({ model: 'opus', statusLine: { type: 'command', command: 'old', padding: 1, refreshInterval: 5 } })
   const after = JSON.parse(withStatusLine(before, '/Users/me/.claude'))
   expect(after.model).toBe('opus')
-  expect(after.statusLine).toEqual({ type: 'command', command: 'bash "/Users/me/.claude/statusline-command.sh"', padding: 1, refreshInterval: 5 })
+  expect(after.statusLine).toEqual({ type: 'command', command: 'bash "/Users/me/.claude/rich-status.sh"', padding: 1, refreshInterval: 5 })
   expect(JSON.parse(withStatusLine('', '/d')).statusLine.command).toBe(statusLineCommand('/d'))
   expect(withStatusLine('{}', '/d').endsWith('}\n')).toBe(true)
 })
@@ -29,17 +29,33 @@ test('a settings file that is not a JSON object is refused, never overwritten', 
   expect(() => withStatusLine('null', '/d')).toThrow('does not hold a JSON object')
 })
 
-test('the statusLine setting runs our renderer, quoted or not', () => {
-  expect(runsOurRenderer({ command: 'bash /Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(true)
-  expect(runsOurRenderer({ command: statusLineCommand('/Users/me/.claude') }, '/Users/me/.claude')).toBe(true)
-  expect(runsOurRenderer({ command: 'bash /elsewhere/statusline-command.sh' }, '/Users/me/.claude')).toBe(false)
-  expect(runsOurRenderer({ command: "bash '/Users/me/.claude/statusline-command.sh'" }, '/Users/me/.claude')).toBe(true)
-  expect(runsOurRenderer({ command: 'GIT_BUDGET=1 bash /Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(true)
-  // The path must be a whole argument.
-  expect(runsOurRenderer({ command: 'bash /Users/me/.claude/statusline-command.sh.old' }, '/Users/me/.claude')).toBe(false)
-  expect(runsOurRenderer({ command: 'bash /x/Users/me/.claude/statusline-command.sh' }, '/Users/me/.claude')).toBe(false)
-  expect(runsOurRenderer(undefined, '/d')).toBe(false)
-  expect(runsOurRenderer({ command: 3 }, '/d')).toBe(false)
+test('the statusLine setting runs a script only when its path is a whole argument', () => {
+  const path = '/Users/me/.claude/rich-status.sh'
+  expect(runsScript({ command: `bash ${path}` }, path)).toBe(true)
+  expect(runsScript({ command: statusLineCommand('/Users/me/.claude') }, path)).toBe(true)
+  expect(runsScript({ command: `bash '${path}'` }, path)).toBe(true)
+  expect(runsScript({ command: `GIT_BUDGET=1 bash ${path}` }, path)).toBe(true)
+  expect(runsScript({ command: 'bash /elsewhere/rich-status.sh' }, path)).toBe(false)
+  expect(runsScript({ command: `bash ${path}.old` }, path)).toBe(false)
+  expect(runsScript({ command: `bash /x${path}` }, path)).toBe(false)
+  expect(runsScript(undefined, path)).toBe(false)
+  expect(runsScript({ command: 3 }, path)).toBe(false)
+})
+
+test('the setting runs this plugin\'s renderer, an old-named copy, or something else', () => {
+  expect(wiring({ command: 'bash "/d/rich-status.sh"' }, '/d')).toBe('ours')
+  expect(wiring({ command: 'bash /d/statusline-command.sh' }, '/d')).toBe('legacy')
+  expect(wiring({ command: 'bash /d/other.sh' }, '/d')).toBe('other')
+  expect(wiring(undefined, '/d')).toBe('other')
+})
+
+test('old-named copies move by themselves only when each is exactly what was installed', () => {
+  const record = { 'statusline-command.sh': 'a', 'statusline-ctl.sh': 'b', 'statusline-lib.sh': 'c' }
+  expect(legacyIsPristine({ 'statusline-command.sh': 'a', 'statusline-ctl.sh': 'b', 'statusline-lib.sh': 'c' }, record)).toBe(true)
+  expect(legacyIsPristine({ 'statusline-command.sh': 'a', 'statusline-ctl.sh': undefined, 'statusline-lib.sh': 'c' }, record)).toBe(true)
+  expect(legacyIsPristine({ 'statusline-command.sh': 'a', 'statusline-ctl.sh': 'edited', 'statusline-lib.sh': 'c' }, record)).toBe(false)
+  expect(legacyIsPristine({ 'statusline-command.sh': undefined, 'statusline-ctl.sh': 'b', 'statusline-lib.sh': 'c' }, record)).toBe(false)
+  expect(legacyIsPristine({ 'statusline-command.sh': 'a', 'statusline-ctl.sh': 'b', 'statusline-lib.sh': 'c' }, {})).toBe(false)
 })
 
 test('a copy is replaced only while it is still what the plugin installed', () => {
@@ -51,15 +67,17 @@ test('a copy is replaced only while it is still what the plugin installed', () =
 })
 
 test('the check names each script and whether the setting runs them', () => {
-  const text = describeCheck({ 'statusline-command.sh': 'current', 'statusline-ctl.sh': 'customized', 'statusline-lib.sh': 'missing' }, false, '/d')
+  const text = describeCheck({ 'rich-status.sh': 'current', 'rich-status-ctl.sh': 'customized', 'rich-status-lib.sh': 'missing' }, 'other', '/d')
   expect(text.split('\n')).toEqual([
     'Status line scripts copied into /d:',
-    '  statusline-command.sh  up to date',
-    '  statusline-ctl.sh      edited since it was copied; left alone (/rich status setup replaces it)',
-    '  statusline-lib.sh      missing (/rich status setup copies it)',
+    '  rich-status.sh      up to date',
+    '  rich-status-ctl.sh  edited since it was copied; left alone (/rich status setup replaces it)',
+    '  rich-status-lib.sh  missing (/rich status setup copies it)',
     "Claude Code's statusLine setting runs something else; /rich status setup points it at these copies.",
   ])
-  expect(describeCheck({ 'statusline-command.sh': 'outdated', 'statusline-ctl.sh': 'current', 'statusline-lib.sh': 'current' }, true, '/d')).toContain(
-    "  statusline-command.sh  older than this plugin; replaced at the next session start\n  statusline-ctl.sh      up to date\n  statusline-lib.sh      up to date\nClaude Code's statusLine setting runs these copies.",
+  const current = { 'rich-status.sh': 'outdated', 'rich-status-ctl.sh': 'current', 'rich-status-lib.sh': 'current' } as const
+  expect(describeCheck(current, 'ours', '/d')).toContain(
+    "  rich-status.sh      older than this plugin; replaced at the next session start\n  rich-status-ctl.sh  up to date\n  rich-status-lib.sh  up to date\nClaude Code's statusLine setting runs these copies.",
   )
+  expect(describeCheck(current, 'legacy', '/d')).toContain('runs the older statusline-*.sh copies; /rich status setup moves them to these names.')
 })

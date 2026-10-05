@@ -11,10 +11,9 @@
 # LINES=1 → A B C on one line · LINES=2 → (A B) / C · LINES=3 → A / B / C
 #   (Claude Code doesn't pass terminal width, so more lines is the reliable way to fit long paths.)
 #
-# Toggles (defaults below; overridden live by ~/.claude/statusline.state via /sl-* shortcuts):
+# Toggles (defaults below; overridden live by ~/.claude/rich-status.state via /sl-* shortcuts):
 #   THEME=aurora|sunset|forest|gray · STYLE=powerline|plain · LINES=1|2|3 · HIDDEN=0|1
 #   SHOW_BAR=0|1 · SHOW_ACCOUNT=0|1 · ACCOUNT_LOCAL=0|1 · SHOW_RESET=0|1 · SHOW_WEATHER=0|1
-# Revert:  cp ~/.claude/statusline-command.pure.bak ~/.claude/statusline-command.sh
 
 # Ensure Homebrew/system tooling is found when Claude Code runs this non-interactively.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -27,7 +26,7 @@ case "${OSTYPE:-}" in msys*|cygwin*) jq() { command jq --binary "$@"; } ;; esac
 
 # Shared state schema (defaults + parser), loaded from next to this script.
 _sl_dir="${BASH_SOURCE[0]%/*}"; [ "$_sl_dir" = "${BASH_SOURCE[0]}" ] && _sl_dir=.
-. "$_sl_dir/statusline-lib.sh"
+. "$_sl_dir/rich-status-lib.sh"
 
 input=$(cat)
 jqr()   { printf '%s' "$input" | jq -r "$1" 2>/dev/null; }
@@ -89,7 +88,7 @@ strip() {
 ' 2>/dev/null)
 
 # ── Options ─────────────────────────────────────────────────────────
-# Defaults + state overlay live in statusline-lib.sh (shared with the controller).
+# Defaults + state overlay live in rich-status-lib.sh (shared with the controller).
 sl_load_state
 [ "$HIDDEN" = "1" ] && { printf '\n'; exit 0; }
 
@@ -200,7 +199,7 @@ git_c() {
   _bounded "$budget" git --no-optional-locks -c core.fsmonitor=false -C "$current_dir" "$@" 2>/dev/null
 }
 acct_label() {
-  local cache="$HOME/.claude/.statusline-account" src="$HOME/.claude.json" ttl=180 now mt age
+  local cache="$HOME/.claude/.rich-status-account" src="$HOME/.claude.json" ttl=180 now mt age
   now=$(date +%s 2>/dev/null || echo 0)
   # Cache by existence + mtime, not by content: an empty file is a valid negative
   # cache (API-key users have no account) and must be honored for its full TTL
@@ -222,7 +221,7 @@ acct_label() {
     local val tmp
     if val=$(jq -r '.oauthAccount.emailAddress // .oauthAccount.displayName // empty' \
                "$src" 2>/dev/null) \
-       && tmp=$(mktemp "${TMPDIR:-/tmp}/statusline-account.XXXXXX" 2>/dev/null); then
+       && tmp=$(mktemp "${TMPDIR:-/tmp}/rich-status-account.XXXXXX" 2>/dev/null); then
       [ -n "$val" ] && val="$val"$'\n'
       { printf '%s' "$val" > "$tmp" && mv "$tmp" "$cache"; } 2>/dev/null || rm -f "$tmp"
     fi

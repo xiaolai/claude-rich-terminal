@@ -23,8 +23,23 @@ import {
   viewerHtml,
 } from './core.ts'
 import type { Diagram, PageScripts } from './core.ts'
-import { describeCheck, EXECUTABLE, runsOurRenderer, SCRIPTS, scriptState, STATUS_HELP, statusCommand, withStatusLine } from './statusline.ts'
-import type { ScriptName, ScriptState } from './statusline.ts'
+import {
+  describeCheck,
+  EXECUTABLE,
+  LEGACY_ACCOUNT_CACHE,
+  LEGACY_SCRIPTS,
+  LEGACY_STATE_FILE,
+  legacyIsPristine,
+  RENDERER,
+  SCRIPTS,
+  scriptState,
+  STATE_FILE,
+  STATUS_HELP,
+  statusCommand,
+  wiring,
+  withStatusLine,
+} from './statusline.ts'
+import type { LegacyScriptName, ScriptName, ScriptState } from './statusline.ts'
 import { renderMermaidAscii } from './vendor/mermaid-ascii.js'
 
 const COMMAND = 'rich'
@@ -328,7 +343,7 @@ async function openInBrowser($: EngineInterface, path: string): Promise<string |
 
 // ── The status line under the prompt ─────────────────────────────────
 
-/** What this plugin last copied into the config folder, per script: a copy still equal to it is the plugin's to replace. */
+/** What this plugin last copied into the config folder, per file name: a copy still equal to it is the plugin's to replace. */
 const INSTALLED_KEY = 'statuslineInstalled'
 
 /** Claude Code's config folder, where settings.json and the copied scripts live. */
@@ -350,11 +365,11 @@ async function readOrNothing($: EngineInterface, path: string): Promise<string |
   }
 }
 
-async function installedRecord($: EngineInterface): Promise<Partial<Record<ScriptName, string>>> {
+/** The record of what was installed, every file name with text kept: old names included, so an old setup can be recognized. */
+async function installedRecord($: EngineInterface): Promise<Record<string, string>> {
   const value: unknown = await $.store.get(INSTALLED_KEY)
   if (typeof value !== 'object' || value === null) return {}
-  const record = value as Record<string, unknown>
-  return Object.fromEntries(SCRIPTS.flatMap(name => (typeof record[name] === 'string' ? [[name, record[name]]] : []))) as Partial<Record<ScriptName, string>>
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
 }
 
 /** Copies the named scripts into `dir`, makes the two entry points executable and records what was copied. */
@@ -368,22 +383,76 @@ async function copyScripts($: EngineInterface, dir: string, bundled: Record<Scri
   await $.store.set(INSTALLED_KEY, { ...(await installedRecord($)), ...Object.fromEntries(names.map(name => [name, bundled[name]])) })
 }
 
+/** `$.fs` cannot delete, so the system does; only ever this plugin's own files. */
+async function removeFiles($: EngineInterface, paths: readonly string[]): Promise<void> {
+  if (paths.length === 0) return
+  const rm = await $.process.run(['rm', '-f', '--', ...paths], { timeoutMs: SYSTEM_TIMEOUT_MS })
+  if (rm.exitCode !== 0) throw new Error(`rm failed: ${rm.stderr.trim()}`)
+}
+
 async function scriptStates($: EngineInterface, dir: string, bundled: Record<ScriptName, string>): Promise<Record<ScriptName, ScriptState>> {
   const record = await installedRecord($)
   const states = await Promise.all(SCRIPTS.map(async name => scriptState(bundled[name], await readOrNothing($, `${dir}/${name}`), record[name])))
   return Object.fromEntries(SCRIPTS.map((name, i) => [name, states[i]!])) as Record<ScriptName, ScriptState>
 }
 
+async function legacyCopies($: EngineInterface, dir: string): Promise<Record<LegacyScriptName, string | undefined>> {
+  const texts = await Promise.all(LEGACY_SCRIPTS.map(name => readOrNothing($, `${dir}/${name}`)))
+  return Object.fromEntries(LEGACY_SCRIPTS.map((name, i) => [name, texts[i]])) as Record<LegacyScriptName, string | undefined>
+}
+
+/** settings.json as it will be with statusLine on the renderer; throws on a file that is not a JSON object. */
+async function newSettings($: EngineInterface, dir: string): Promise<string> {
+  return withStatusLine((await readOrNothing($, `${dir}/settings.json`)) ?? '', dir)
+}
+
 /**
- * Brings the copied scripts up to this plugin's version when the statusLine
- * setting runs them: a missing or outdated copy is replaced, a current one is
- * recorded as the plugin's, and a customized one is left alone.
+ * Copies the scripts, carries the settings over from an old-named state file,
+ * points statusLine at the renderer, then removes the old-named copies that
+ * are still exactly what this plugin installed. In that order, so a failure
+ * at any step leaves a working status line. `settings` is the settings.json
+ * text to write, made by `newSettings` before anything else is touched.
+ */
+async function installStatusLine($: EngineInterface, dir: string, bundled: Record<ScriptName, string>, settings: string): Promise<void> {
+  await copyScripts($, dir, bundled, SCRIPTS)
+  const home = await $.env.get('HOME')
+  const stateDir = home !== undefined && home.startsWith('/') ? `${home}/.claude` : undefined
+  const oldState = stateDir === undefined ? undefined : await readOrNothing($, `${stateDir}/${LEGACY_STATE_FILE}`)
+  if (stateDir !== undefined && oldState !== undefined && (await readOrNothing($, `${stateDir}/${STATE_FILE}`)) === undefined) {
+    await $.fs.write(`${stateDir}/${STATE_FILE}`, oldState)
+  }
+  await $.fs.write(`${dir}/settings.json`, settings)
+  const record = await installedRecord($)
+  const copies = await legacyCopies($, dir)
+  const ours = LEGACY_SCRIPTS.filter(name => copies[name] !== undefined && copies[name] === record[name])
+  await removeFiles($, [
+    ...ours.map(name => `${dir}/${name}`),
+    ...(stateDir === undefined || oldState === undefined ? [] : [`${stateDir}/${LEGACY_STATE_FILE}`, `${stateDir}/${LEGACY_ACCOUNT_CACHE}`]),
+  ])
+  await $.store.set(INSTALLED_KEY, Object.fromEntries(Object.entries(await installedRecord($)).filter(([name]) => !(LEGACY_SCRIPTS as readonly string[]).includes(name))))
+}
+
+/**
+ * Keeps the status line current at a session start. When statusLine runs this
+ * plugin's renderer, a missing or outdated copy is replaced, a current one is
+ * recorded as the plugin's, and an edited one is left alone. When it runs the
+ * old-named copies and they are exactly what the plugin installed, the setup
+ * moves to the new names; otherwise it waits for /rich status setup.
  */
 async function refreshStatusScripts($: EngineInterface): Promise<void> {
   try {
     const dir = await configDir($)
-    if (dir === undefined || !runsOurRenderer((await $.settings.read({ source: 'user' })).statusLine, dir)) return
+    if (dir === undefined) return
+    const wired = wiring((await $.settings.read({ source: 'user' })).statusLine, dir)
+    if (wired === 'other') return
     const bundled = await bundledScripts($)
+    if (wired === 'legacy') {
+      if (legacyIsPristine(await legacyCopies($, dir), await installedRecord($))) {
+        await installStatusLine($, dir, bundled, await newSettings($, dir))
+        $.ui.log('rich-terminal: status line moved to the rich-status names', { to: 'debug' })
+      }
+      return
+    }
     const states = await scriptStates($, dir, bundled)
     const stale = SCRIPTS.filter(name => states[name] === 'missing' || states[name] === 'outdated')
     const record = await installedRecord($)
@@ -401,26 +470,24 @@ async function runStatus($: EngineInterface, words: readonly string[]): Promise<
   if (command.kind === 'invalid') return `${command.reason}\n${STATUS_HELP}`
   if (command.kind === 'controller') {
     // The bundled controller: it writes only the state file, which the copied renderer reads.
-    const ran = await $.process.run(['bash', `${$.plugin.root}/statusline/scripts/statusline-ctl.sh`, command.action], { timeoutMs: SYSTEM_TIMEOUT_MS })
+    const ran = await $.process.run(['bash', `${$.plugin.root}/statusline/scripts/rich-status-ctl.sh`, command.action], { timeoutMs: SYSTEM_TIMEOUT_MS })
     return ran.exitCode === 0 ? ran.stdout.trim() : `The status line controller failed: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`
   }
   const dir = await configDir($)
   if (dir === undefined) return 'No config folder: neither CLAUDE_CONFIG_DIR nor HOME is an absolute path.'
   const bundled = await bundledScripts($)
-  const settingsPath = `${dir}/settings.json`
   if (command.kind === 'check') {
-    const wired = runsOurRenderer((await $.settings.read({ source: 'user' })).statusLine, dir)
+    const wired = wiring((await $.settings.read({ source: 'user' })).statusLine, dir)
     return describeCheck(await scriptStates($, dir, bundled), wired, dir)
   }
   let settings: string
   try {
-    settings = withStatusLine((await readOrNothing($, settingsPath)) ?? '', dir)
+    settings = await newSettings($, dir)
   } catch (error) {
-    return `${settingsPath} could not be read as JSON, so it was left alone: ${String(error)}`
+    return `${dir}/settings.json could not be read as JSON, so it was left alone: ${String(error)}`
   }
-  await copyScripts($, dir, bundled, SCRIPTS)
-  await $.fs.write(settingsPath, settings)
-  return [`Copied ${SCRIPTS.join(', ')} to ${dir}.`, `${settingsPath}: statusLine runs ${dir}/statusline-command.sh.`, 'The status line appears with the next status update.'].join('\n')
+  await installStatusLine($, dir, bundled, settings)
+  return [`Copied ${SCRIPTS.join(', ')} to ${dir}.`, `${dir}/settings.json: statusLine runs ${dir}/${RENDERER}.`, 'The status line appears with the next status update.'].join('\n')
 }
 
 export const register: Register = (on, options) => {

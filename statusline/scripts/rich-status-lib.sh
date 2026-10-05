@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Shared state schema for the statusline renderer and controller.
+# Shared state schema for the status line renderer and controller.
 #
 # SL_SCHEMA below is the ONLY declaration. Defaults, parsing, validation and
 # serialization are all loops over it, so adding a field means adding one line
 # and nothing else — there is no second list to keep in step. Both scripts source
 # this file from their own directory (see the
-# `. "${BASH_SOURCE[0]%/*}/statusline-lib.sh"` line at the top of each), so they
-# cannot drift apart in how ~/.claude/statusline.state is read OR written.
+# `. "${BASH_SOURCE[0]%/*}/rich-status-lib.sh"` line at the top of each), so they
+# cannot drift apart in how ~/.claude/rich-status.state is read OR written.
 
 # Location of the live state file (overridable before sourcing, e.g. for tests).
-: "${STATE:=$HOME/.claude/statusline.state}"
+: "${STATE:=$HOME/.claude/rich-status.state}"
 
 # KEY|default|allowed values. Row order is also the order written to the file.
 #

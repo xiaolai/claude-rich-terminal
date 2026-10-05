@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# statusline-ctl.sh — flip status line appearance by writing ~/.claude/statusline.state,
-# which statusline-command.sh reads on its next render (so changes appear within a tick).
+# rich-status-ctl.sh — flip status line appearance by writing ~/.claude/rich-status.state,
+# which rich-status.sh reads on its next render (so changes appear within a tick).
 #
 # Actions:
 #   theme   cycle the look: plain → gray → aurora → sunset → forest → plain
@@ -15,12 +15,12 @@
 #   icons   toggle the weather icons between standard Unicode and Nerd Font glyphs
 #   status  print every setting; changes nothing
 #
-# Usage:  bash ~/.claude/statusline-ctl.sh {theme|style|lines|toggle|hide|show|bar|account|reset|weather|icons|status}
+# Usage:  bash ~/.claude/rich-status-ctl.sh {theme|style|lines|toggle|hide|show|bar|account|reset|weather|icons|status}
 set -u
 
 # Shared state schema (defaults + parser), loaded from next to this script.
 _sl_dir="${BASH_SOURCE[0]%/*}"; [ "$_sl_dir" = "${BASH_SOURCE[0]}" ] && _sl_dir=.
-. "$_sl_dir/statusline-lib.sh"
+. "$_sl_dir/rich-status-lib.sh"
 sl_load_state
 
 # status: report every setting and stop, before anything is written.
@@ -54,13 +54,13 @@ case "${1:-}" in
   toggle) [ "$HIDDEN" = "1" ] && HIDDEN=0 || HIDDEN=1 ;;
   hide)   HIDDEN=1 ;;
   show)   HIDDEN=0 ;;
-  *) printf 'usage: statusline-ctl.sh {theme|style|lines|toggle|hide|show|bar|account|reset|weather|icons|status}\n' >&2; exit 2 ;;
+  *) printf 'usage: rich-status-ctl.sh {theme|style|lines|toggle|hide|show|bar|account|reset|weather|icons|status}\n' >&2; exit 2 ;;
 esac
 
-# Serialization (unique temp + atomic rename) lives in statusline-lib.sh next to
+# Serialization (unique temp + atomic rename) lives in rich-status-lib.sh next to
 # the defaults and the parser, so the key list cannot drift between read and write.
 if ! sl_write_state; then
-  printf 'statusline-ctl: failed to write %s\n' "$STATE" >&2; exit 1
+  printf 'rich-status-ctl: failed to write %s\n' "$STATE" >&2; exit 1
 fi
 
 if [ "$STYLE" = "plain" ]; then shown=plain; else shown="powerline/$THEME"; fi
