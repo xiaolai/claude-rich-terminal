@@ -4,7 +4,7 @@
     "name": "xiaolai"
   },
   "metadata": {
-    "description": "rich-terminal — Mermaid diagrams and a status band in Claude Code, by xiaolai"
+    "description": "rich-terminal — Mermaid diagrams in Claude Code replies, by xiaolai"
   },
   "plugins": [
     {
@@ -13,7 +13,7 @@
         "source": "github",
         "repo": "xiaolai/claude-rich-terminal"
       },
-      "description": "Mermaid diagrams drawn inside Claude Code replies (optional Ghostty/kitty images, offline browser view), plus a Token Weather band above the prompt that forecasts the context window, with an optional full status: git, model, cost and rate limits.",
+      "description": "Mermaid diagrams drawn inside Claude Code replies, with optional terminal images (Ghostty, kitty) and a full offline browser view.",
       "version": "0.4.0",
       "author": {
         "name": "xiaolai"
@@ -26,9 +26,7 @@
         "diagrams",
         "terminal",
         "mod",
-        "markdown",
-        "statusline",
-        "status-line"
+        "markdown"
       ],
       "category": "developer-tools"
     }

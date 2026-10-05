@@ -1,6 +1,6 @@
 # Claude Rich Terminal
 
-Mermaid diagrams drawn inside Claude Code replies, instead of raw source, and a Token Weather band above the prompt that forecasts the context window, with an optional full status.
+Mermaid diagrams drawn inside Claude Code replies, instead of raw source.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/demo-dark.gif">
@@ -15,8 +15,6 @@ The diagram in the animation is the plugin's own output: its text drawing, then 
 - **Fits the terminal.** A left-to-right flowchart too wide for the window is redrawn top-to-bottom. If it still does not fit, the source is shown. Changing the terminal's width redraws.
 - **Optional pictures.** In Ghostty or kitty, diagrams can be drawn as real images instead (see [Settings](#settings)).
 - **Full view in the browser.** `/rich open` opens a diagram as a zoomable page that works offline.
-- **Token Weather.** A band above the prompt forecasts the context window, from ☀ Clear to ↯ Compact soon, with a sparkline of recent turns.
-- **Status band.** With `/rich status rows all`, the band also shows the folder and git state, model and effort, session time and cost, account and rate limits, restyled live with `/rich status` (see [Status band](#status-band)).
 
 Terminal drawings cover flowcharts, sequence, state, class, ER and xy charts. Other types (pie, gantt, mindmap, timeline, gitGraph, journey) stay as source, unless pictures are on.
 
@@ -413,41 +411,6 @@ journey
 
 <!-- gallery:end -->
 
-## Status band
-
-A band above the prompt, drawn by the plugin in interactive terminal sessions. By default it is Token Weather alone, one row:
-
-```
-☂  Showers > 67% of context  134.4k / 200k > last turns ▁▂▃▅█  ▲ +98.3k last turn
-```
-
-That default suits a setup with a `statusLine` command, which Claude Code draws under the prompt. A plugin cannot draw there itself: its only slot under the prompt is a one-line notice without color. Without a `statusLine` command, `/rich status rows all` adds the full status above the weather. In the default `plain` look, at a width where everything fits on one row:
-
-```
-my-app/src > main ↑1 > +12 -3 ?2 > Opus · xhigh > 12m · $1.23 > me > 5h 12% · 7d 67%
-☂  Showers > 67% of context  134.4k / 200k > last turns ▁▂▃▅█  ▲ +98.3k last turn
-```
-
-The other looks (`gray`, `aurora`, `sunset`, `forest`) draw each segment on a background gradient with powerline arrows, which need a font with the U+E0B0 glyph (a Nerd Font; Ghostty bundles one). The colors are tuned for a dark terminal.
-
-| Group | Segment | Shows |
-|---|---|---|
-| A | Folder | The path relative to the project when inside it, else the `~`-abbreviated path |
-| A | Branch | Green when the working tree is clean, amber when anything changed; `↑n ↓m` against the upstream. Neither color when git could not measure the tree |
-| A | Changes | `+added -deleted` against `HEAD`, and `?n` untracked files |
-| B | Model | The model and the effort the main loop's latest request used (effort appears after the first request) |
-| B | Context | `ctx 42%`, or an 8-cell gauge with `bar on`; shown here only when Token Weather is off |
-| B | Time · cost | How long the session has run, and what it has cost |
-| C | Account | The signed-in account from Claude Code's own `.claude.json`: the email's local part, the whole email, or hidden |
-| C | Limits | 5-hour and 7-day rate-limit use, with reset countdowns when `resets on` |
-| — | Token Weather | Its own last row: the forecast, the context fill, and the last 12 turns as a sparkline with the latest change |
-
-A segment with no data is left out. The context and limit figures share one scale: green below 60 %, amber from 60 %, red from 85 %. `lines auto` puts groups A, B and C on the fewest rows that fit the band's width.
-
-The figures are read every 5 seconds and after each model request; with `rows weather`, only the session's own figures, never git or the account. Git gets a 3-second budget per reading (2 seconds a call): a slow repository loses its git segments, never the band. Nothing is read in `claude -p` runs or outside a terminal.
-
-The band sits above the prompt; Claude Code's own `statusLine` setting draws below it. With `rows all` and a `statusLine` command, the same figures show twice.
-
 ## Commands
 
 | Command | Effect |
@@ -455,15 +418,6 @@ The band sits above the prompt; Claude Code's own `statusLine` setting draws bel
 | `/rich list` | Number the diagrams in this conversation, with their ids |
 | `/rich open [n\|id]` | Open diagram *n* (or by id) in the default browser; the latest without one. Uses `open` on macOS and `xdg-open` on Linux |
 | `/rich on` / `/rich off` | Draw diagrams, or leave replies as Claude Code draws them |
-| `/rich status` | Show the status band's settings |
-| `/rich status on` / `off` | Show or hide the band |
-| `/rich status rows [which]` | `weather` (Token Weather alone, the default) or `all` (every segment); without one, the other |
-| `/rich status look [name]` | `plain`, `gray`, `aurora`, `sunset` or `forest`; without a name, the next one |
-| `/rich status lines [n]` | `auto`, `1`, `2` or `3` rows for groups A, B and C; without one, the next |
-| `/rich status account [show]` | `name`, `email` or `off`; without one, the next |
-| `/rich status bar` / `resets` / `weather [on\|off]` | The context gauge, the reset countdowns, Token Weather; without a value, toggle |
-
-Status band changes apply at once and are kept across sessions.
 
 ## Settings
 
@@ -498,12 +452,10 @@ To try it from a checkout instead, run `claude --plugin-dir /path/to/claude-rich
 - In a dense text drawing, an edge label can land on another line or a container's border, and an edge can cross a box. The picture and `/rich open` draw such diagrams exactly.
 - The terminal renderer skips a line it cannot parse and draws the rest; a diagram with a syntax error can therefore be drawn incompletely. `/rich open` shows Mermaid's own error.
 - A diagram that loads external images draws in the browser without them: the pages block every network request.
-- The status band shows the effort only after the session's first model request: no earlier figure is available to a plugin.
-- Token Weather's sparkline counts main-loop turns only; a subagent's turn takes no reading.
 
 ## Background
 
-This plugin came out of reading [Getting started with Claude Code mods](https://claude.dev/blog/getting-started-with-claude-code-mods/), published on claude.dev on October 1, 2026. Token Weather is that tutorial's example, adapted into the status band.
+This plugin came out of reading [Getting started with Claude Code mods](https://claude.dev/blog/getting-started-with-claude-code-mods/), published on claude.dev on October 1, 2026.
 
 ## Development
 
@@ -514,7 +466,7 @@ node scripts/check-pages.mjs               # browser pages in headless Chrome: d
 npx tsc -p . && npx tsc -p tsconfig.viewer.json
 ```
 
-`hooks/core.ts` (diagrams) and `hooks/status.ts` (the status band) hold the logic that does not touch Claude Code; `hooks/register.tsx` holds the hooks. The renderers are vendored; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+`hooks/core.ts` holds the logic that does not touch Claude Code; `hooks/register.tsx` holds the hooks. The renderers are vendored; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 

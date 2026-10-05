@@ -1,7 +1,7 @@
 {
   "name": "rich-terminal",
   "version": "0.4.0",
-  "description": "Mermaid diagrams drawn inside Claude Code replies, and a Token Weather band above the prompt that forecasts the context window, with an optional full status.",
+  "description": "Mermaid diagrams drawn inside Claude Code replies, with optional terminal images and a full browser view.",
   "author": {
     "name": "xiaolai"
   },

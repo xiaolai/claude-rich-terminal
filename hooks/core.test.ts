@@ -192,8 +192,6 @@ test('commands parse strictly', () => {
   expect(parseCommand('open a b').kind).toBe('invalid')
   expect(parseCommand('preview').kind).toBe('invalid')
   expect(parseCommand('').kind).toBe('help')
-  expect(parseCommand('status')).toEqual({ kind: 'status', words: [] })
-  expect(parseCommand('status look aurora')).toEqual({ kind: 'status', words: ['look', 'aurora'] })
 })
 
 test('whole-message Markdown is kept when reference definitions or containers are involved', () => {

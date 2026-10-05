@@ -316,14 +316,12 @@ export type Command =
   | { kind: 'off' }
   | { kind: 'open'; id?: string }
   | { kind: 'list' }
-  | { kind: 'status'; words: string[] }
   | { kind: 'invalid'; reason: string }
 
 export function parseCommand(args: string): Command {
   const words = args.trim().split(/\s+/).filter(Boolean)
   const [verb, id, ...rest] = words
-  if (verb === undefined || verb === 'help') return { kind: 'help' }
-  if (verb === 'status') return { kind: 'status', words: words.slice(1) }
+  if (verb === undefined || verb === 'help' || verb === 'status') return { kind: 'help' }
   if (rest.length > 0) return { kind: 'invalid', reason: 'too many arguments' }
   if (verb === 'list') return id === undefined ? { kind: 'list' } : { kind: 'invalid', reason: 'too many arguments' }
   if (verb === 'on' || verb === 'off') return id === undefined ? { kind: verb } : { kind: 'invalid', reason: 'too many arguments' }
